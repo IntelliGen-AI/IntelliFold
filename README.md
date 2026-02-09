@@ -87,14 +87,11 @@ If you use IntelliFold in your research, please cite our paper:
       url={https://github.com/IntelliGen-AI/IntelliFold/assets/Intellifold_v2_release_note.pdf}
 }
 
-@misc{theintfoldteam2025intfoldcontrollablefoundationmodel,
-      title={IntFold: A Controllable Foundation Model for General and Specialized Biomolecular Structure Prediction}, 
-      author={The IntFold Team and Leon Qiao and Wayne Bai and He Yan and Gary Liu and Nova Xi and Xiang Zhang and Siqi Sun},
-      year={2025},
-      eprint={2507.02025},
-      archivePrefix={arXiv},
-      primaryClass={q-bio.BM},
-      url={https://arxiv.org/abs/2507.02025}
+@article{team2025intfold,
+  title={IntFold: A Controllable Foundation Model for General and Specialized Biomolecular Structure Prediction},
+  author={Team, The IntFold and Qiao, Leon and Bai, Wayne and Yan, He and Liu, Gary and Xi, Nova and Zhang, Xiang and Sun, Siqi},
+  journal={arXiv preprint arXiv:2507.02025},
+  year={2025}
 }
 ```
 
