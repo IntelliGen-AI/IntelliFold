@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="intellifold",
     python_requires=">=3.10",
-    version="2.0.0",
+    version="2.0.1",
     packages=find_packages(include=["intellifold", "intellifold.*", "runner"]),
     description="IntelliFold: A Controllable Foundation Model for General and Specialized Biomolecular Structure Prediction.",
     author="IntelliGen AI",

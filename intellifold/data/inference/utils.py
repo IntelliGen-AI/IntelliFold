@@ -27,25 +27,25 @@ from pathlib import Path
 opener = urllib.request.build_opener()
 opener.addheaders = [('User-Agent', 'Mozilla/5.0')]
 urllib.request.install_opener(opener)
-
+HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "huggingface.co")
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #### huggingface offical URL
-CCD_URL = "https://huggingface.co/intelligenAI/intellifold/resolve/main/ccd.pkl"
+CCD_URL = f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/ccd.pkl"
 MODEL_URL = (
-    "https://huggingface.co/intelligenAI/intellifold/resolve/main/intellifold_v0.1.0.pt"
+    f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/intellifold_v0.1.0.pt"
 )
 V2_FLASH_MODEL_URL = (
-    "https://huggingface.co/intelligenAI/intellifold/resolve/main/intellifold_v2_flash.pt"
+    f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/intellifold_v2_flash.pt"
 )
 V2_MODEL_URL = (
-    "https://huggingface.co/intelligenAI/intellifold/resolve/main/intellifold_v2.pt"
+    f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/intellifold_v2.pt"
 )
-PROTEIN_PDB_SEQUENCES_URL = "https://huggingface.co/intelligenAI/intellifold/resolve/main/unique_protein_sequences.fasta"
-RNA_PDB_SEQUENCES_URL = "https://huggingface.co/intelligenAI/intellifold/resolve/main/unique_nucleic_acid_sequences.fasta"
-PROTEIN_PDB_GROUPS_URL = "https://huggingface.co/intelligenAI/intintellifoldfold/resolve/main/protein_id_groups.json"
-RNA_PDB_GROUPS_URL = "https://huggingface.co/intelligenAI/intellifold/resolve/main/nucleic_acid_id_groups.json"
+PROTEIN_PDB_SEQUENCES_URL = f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/unique_protein_sequences.fasta"
+RNA_PDB_SEQUENCES_URL = f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/unique_nucleic_acid_sequences.fasta"
+PROTEIN_PDB_GROUPS_URL = f"https://{HF_ENDPOINT}/intelligenAI/intintellifoldfold/resolve/main/protein_id_groups.json"
+RNA_PDB_GROUPS_URL = f"https://{HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/nucleic_acid_id_groups.json"
 
 
 #### huggingface-mirror URL
@@ -65,7 +65,7 @@ PROTEIN_PDB_GROUPS_MIRROR_URL = "https://hf-mirror.com/intelligenAI/intellifold/
 RNA_PDB_GROUPS_MIRROR_URL = "https://hf-mirror.com/intelligenAI/intellifold/resolve/main/nucleic_acid_id_groups.json"
 
     
-def download(cache: Path) -> None:
+def download(cache: Path, model: str) -> None:
     """Download all the required data.
 
     Parameters
@@ -88,38 +88,44 @@ def download(cache: Path) -> None:
             urllib.request.urlretrieve(CCD_MIRROR_URL, str(ccd))
             
     # Download model
-    model = cache / "intellifold_v0.1.0.pt"
-    if not model.exists():
-        print(
-            f"Downloading the model weights to {model}. You may "
-            "change the cache directory with the --cache flag."
-        )
-        try:
-            urllib.request.urlretrieve(MODEL_URL, str(model))  
-        except:
-            urllib.request.urlretrieve(MODEL_MIRROR_URL, str(model))  
-    # Download v2 flash model
-    v2_flash_model = cache / "intellifold_v2_flash.pt"
-    if not v2_flash_model.exists():
-        print(
-            f"Downloading the v2 flash model weights to {v2_flash_model}. You may "
-            "change the cache directory with the --cache flag."
-        )
-        try:
-            urllib.request.urlretrieve(V2_FLASH_MODEL_URL, str(v2_flash_model))  
-        except:
-            urllib.request.urlretrieve(V2_FLASH_MODEL_MIRROR_URL, str(v2_flash_model))
-    # Download v2 model
-    v2_model = cache / "intellifold_v2.pt"
-    if not v2_model.exists():
-        print(
-            f"Downloading the v2 model weights to {v2_model}. You may "
-            "change the cache directory with the --cache flag."
-        )
-        try:
-            urllib.request.urlretrieve(V2_MODEL_URL, str(v2_model))  
-        except:
-            urllib.request.urlretrieve(V2_MODEL_MIRROR_URL, str(v2_model))
+    if model == "v1":
+        model = cache / "intellifold_v0.1.0.pt"
+        if not model.exists():
+            print(
+                f"Downloading the model weights to {model}. You may "
+                "change the cache directory with the --cache flag."
+            )
+            try:
+                urllib.request.urlretrieve(MODEL_URL, str(model))  
+            except:
+                urllib.request.urlretrieve(MODEL_MIRROR_URL, str(model))
+                
+    elif model == "v2-flash":
+        # Download v2 flash model
+        v2_flash_model = cache / "intellifold_v2_flash.pt"
+        if not v2_flash_model.exists():
+            print(
+                f"Downloading the v2 flash model weights to {v2_flash_model}. You may "
+                "change the cache directory with the --cache flag."
+            )
+            try:
+                urllib.request.urlretrieve(V2_FLASH_MODEL_URL, str(v2_flash_model))  
+            except:
+                urllib.request.urlretrieve(V2_FLASH_MODEL_MIRROR_URL, str(v2_flash_model))
+    elif model == "v2":
+        # Download v2 model
+        v2_model = cache / "intellifold_v2.pt"
+        if not v2_model.exists():
+            print(
+                f"Downloading the v2 model weights to {v2_model}. You may "
+                "change the cache directory with the --cache flag."
+            )
+            try:
+                urllib.request.urlretrieve(V2_MODEL_URL, str(v2_model))  
+            except:
+                urllib.request.urlretrieve(V2_MODEL_MIRROR_URL, str(v2_model))
+    else:
+        raise ValueError(f"Invalid model: {model} for downloading model weights.")
             
     # Download Protein Sequences database
     protein_sequences = cache / "unique_protein_sequences.fasta"

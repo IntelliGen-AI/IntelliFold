@@ -180,7 +180,7 @@ def main(args):
     
     if accelerator.is_main_process:
         # Download necessary data and model
-        download(cache)
+        download(cache, args.model)
 
     if accelerator.is_main_process:
         # Validate inputs
