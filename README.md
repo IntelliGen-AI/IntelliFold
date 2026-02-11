@@ -67,6 +67,8 @@ To more complete installation instructions and usage, please refer to the [Insta
 
 4. **Optional Optimization**: Enable [custom kernels](docs/kernels.md) for faster inference and reduced memory usage
 
+5. **Custom MSA Servers**: For enterprise or private deployments requiring authentication, see the [MSA Server Authentication](docs/usage.md#msa-server-authentication) section in our usage guide.
+
 For comprehensive usage instructions and examples, refer to the [Usage Guide](docs/usage.md).
 
 

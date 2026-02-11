@@ -28,6 +28,43 @@ intellifold predict ./examples/5S8I_A.yaml --out_dir ./output --only_run_data_pr
 intellifold predict ./examples/5S8I_A.yaml --out_dir ./output --model v2
 ```
 
+## MSA Server Authentication
+
+When using custom MSA servers that require authentication (such as enterprise or private deployments), IntelliFold supports both basic authentication and API key authentication.
+
+### Quick Setup
+
+**For API Key Authentication (recommended):**
+```bash
+# Set environment variable (secure)
+export MSA_API_KEY_VALUE=your-api-key
+
+# Run with custom MSA server
+intellifold predict input.yaml --out_dir ./output --use_msa_server 
+  --msa_server_url https://your-msa-server.com 
+  --api_key_header X-API-Key
+```
+
+**For Basic Authentication:**
+```bash
+# Set environment variables (secure)
+export MSA_USERNAME=your-username
+export MSA_PASSWORD=your-password
+
+# Run with custom MSA server
+intellifold predict input.yaml --out_dir ./output --use_msa_server 
+  --msa_server_url https://your-msa-server.com
+```
+
+### Authentication Options
+
+- **Environment variables** (recommended for security): `MSA_API_KEY_VALUE`, `MSA_USERNAME`, `MSA_PASSWORD`
+- **Custom headers**: Use `--api_key_header` for different API key header names (e.g., `X-Gravitee-Api-Key`)
+- **Multiple auth types**: Cannot use both basic auth and API key simultaneously
+- **Backward compatibility**: All authentication is optional - existing workflows continue to work
+
+The public ColabFold server (`https://api.colabfold.com`) requires no authentication and remains the default.
+
 ### Run with Bash Script
 
 The aurguments is the same as `intellifold predict`, and you can set the parameters in the script.
@@ -62,6 +99,14 @@ Common arguments of this `scripts`/`intellifold predict` are explained as follow
   Whether to use the MMSeqs2 server for MSA generation.
 * `--msa_server_url` (`str`, default: `https://api.colabfold.com`)  
   MSA server url. Used only if `--use_msa_server` is set.
+* `--msa_server_username` (`str`, default: `None`)  
+  Username for basic authentication to MSA server. Can use environment variable `MSA_USERNAME`.
+* `--msa_server_password` (`str`, default: `None`)  
+  Password for basic authentication to MSA server. Can use environment variable `MSA_PASSWORD`.
+* `--api_key_header` (`str`, default: `X-API-Key`)  
+  Header name for API key authentication to MSA server.
+* `--api_key_value` (`str`, default: `None`)  
+  API key value for authentication to MSA server. Can use environment variable `MSA_API_KEY_VALUE`.
 * `--msa_pairing_strategy` (`str`, default: `complete`)  
   Pairing strategy to use. Used only if `--use_msa_server` is set. Options are 'greedy' and 'complete'.
 * `--no_pairing` (`FLAG`, default: `False`)  

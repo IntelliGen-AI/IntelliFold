@@ -153,6 +153,30 @@ def main(args):
     # # DO SOME INITIAL SETUP
     # #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
     init_logging()
+    
+    # Validate authentication arguments if MSA server is used
+    if args.use_msa_server:
+        # Get credentials from environment variables if not provided via CLI
+        msa_username = args.msa_server_username or os.getenv("MSA_USERNAME")
+        msa_password = args.msa_server_password or os.getenv("MSA_PASSWORD")
+        api_key_value = args.api_key_value or os.getenv("MSA_API_KEY_VALUE")
+        
+        # Check if both basic auth and API key are provided
+        has_basic_auth = msa_username and msa_password
+        has_api_key = api_key_value
+        
+        if has_basic_auth and has_api_key:
+            raise ValueError(
+                "Only one authentication method (basic or API key) can be used at a time. "
+                "Please provide either --msa_server_username/--msa_server_password OR "
+                "--api_key_value, but not both."
+            )
+        
+        # Update args with environment variables if needed
+        args.msa_server_username = msa_username
+        args.msa_server_password = msa_password
+        args.api_key_value = api_key_value
+    
     seeds = args.seed
     seeds = list(map(int, seeds.split(",")))
     set_seed(seeds[0])
@@ -206,6 +230,10 @@ def main(args):
             msa_pairing_strategy=args.msa_pairing_strategy,
             max_msa_seqs=16384,
             use_pairing=not args.no_pairing,
+            msa_server_username=args.msa_server_username,
+            msa_server_password=args.msa_server_password,
+            api_key_header=args.api_key_header,
+            api_key_value=args.api_key_value,
         )
         if args.return_similar_seq:
             compute_similar_sequence(
@@ -474,6 +502,30 @@ if __name__ == "__main__":
         type=str,
         help="MSA server url. Used only if --use_msa_server is set.",
         default="https://api.colabfold.com",
+    )
+    parser.add_argument(
+        "--msa_server_username",
+        type=str,
+        help="Username for basic authentication to MSA server. Can also be set via MSA_USERNAME environment variable.",
+        default=None,
+    )
+    parser.add_argument(
+        "--msa_server_password",
+        type=str,
+        help="Password for basic authentication to MSA server. Can also be set via MSA_PASSWORD environment variable (recommended).",
+        default=None,
+    )
+    parser.add_argument(
+        "--api_key_header",
+        type=str,
+        help="Header name for API key authentication to MSA server.",
+        default="X-API-Key",
+    )
+    parser.add_argument(
+        "--api_key_value",
+        type=str,
+        help="API key value for authentication to MSA server. Can also be set via MSA_API_KEY_VALUE environment variable (recommended).",
+        default=None,
     )
     parser.add_argument(
         "--msa_pairing_strategy",

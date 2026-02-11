@@ -46,12 +46,54 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
     use_pairing: bool = False,
     pairing_strategy: str = "greedy",
     host_url: str = "https://api.colabfold.com",
+    msa_server_username: str = None,
+    msa_server_password: str = None,
+    api_key_header: str = "X-API-Key",
+    api_key_value: str = None,
 ) -> tuple[list[str], list[str]]:
+    """
+    Run MMSeqs2 server query for MSA generation.
+    
+    Args:
+        x: Input sequence(s) as string or list of strings.
+        prefix: Prefix for temporary files.
+        use_env: Whether to use environmental databases.
+        use_filter: Whether to use filtering.
+        use_pairing: Whether to use pairing mode.
+        pairing_strategy: Strategy for pairing ('greedy' or 'complete').
+        host_url: URL of the MSA server.
+        msa_server_username: Username for basic authentication.
+        msa_server_password: Password for basic authentication.
+        api_key_header: Header name for API key authentication.
+        api_key_value: API key value for authentication.
+        
+    Returns:
+        Tuple of MSA results as list of strings.
+    """
     submission_endpoint = "ticket/pair" if use_pairing else "ticket/msa"
+
+    # Log MSA server information
+    auth_method = "no authentication"
+    if msa_server_username and msa_server_password:
+        auth_method = f"basic authentication (user: {msa_server_username})"
+    elif api_key_value:
+        auth_method = f"API key authentication (header: {api_key_header})"
+    
+    logger.info(f"Connecting to MSA server: {host_url} with {auth_method}")
 
     # Set header agent as intellifold
     headers = {}
     headers["User-Agent"] = "intellifold"
+    
+    # Configure authentication
+    auth = None
+    if msa_server_username and msa_server_password:
+        # Basic authentication
+        from requests.auth import HTTPBasicAuth
+        auth = HTTPBasicAuth(msa_server_username, msa_server_password)
+    elif api_key_value:
+        # API key authentication
+        headers[api_key_header] = api_key_value
 
     def submit(seqs, mode, N=101):
         n, query = N, ""
@@ -69,10 +111,15 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
                     data={"q": query, "mode": mode},
                     timeout=6.02,
                     headers=headers,
+                    auth=auth,
                 )
+                res.raise_for_status()  # Raises HTTPError for non-2xx status codes
             except requests.exceptions.Timeout:
                 logger.warning("Timeout while submitting to MSA server. Retrying...")
                 continue
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"MSA server error {res.status_code}: {res.text} - {e}")
+                raise Exception(f"MSA server error {res.status_code}") from e
             except Exception as e:
                 error_count += 1
                 logger.warning(
@@ -97,13 +144,17 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
             error_count = 0
             try:
                 res = requests.get(
-                    f"{host_url}/ticket/{ID}", timeout=6.02, headers=headers
+                    f"{host_url}/ticket/{ID}", timeout=6.02, headers=headers, auth=auth
                 )
+                res.raise_for_status()  # Raises HTTPError for non-2xx status codes
             except requests.exceptions.Timeout:
                 logger.warning(
                     "Timeout while fetching status from MSA server. Retrying..."
                 )
                 continue
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"MSA server error {res.status_code} while checking status: {e}")
+                raise Exception(f"MSA server error {res.status_code}") from e
             except Exception as e:
                 error_count += 1
                 logger.warning(
@@ -127,13 +178,17 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
         while True:
             try:
                 res = requests.get(
-                    f"{host_url}/result/download/{ID}", timeout=6.02, headers=headers
+                    f"{host_url}/result/download/{ID}", timeout=6.02, headers=headers, auth=auth
                 )
+                res.raise_for_status()  # Raises HTTPError for non-2xx status codes
             except requests.exceptions.Timeout:
                 logger.warning(
                     "Timeout while fetching result from MSA server. Retrying..."
                 )
                 continue
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"MSA server error {res.status_code} while downloading results: {e}")
+                raise Exception(f"MSA server error {res.status_code} while downloading results") from e
             except Exception as e:
                 error_count += 1
                 logger.warning(
@@ -217,7 +272,7 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
                 pbar.set_description(out["status"])
                 while out["status"] in ["UNKNOWN", "RUNNING", "PENDING"]:
                     t = 5 + random.randint(0, 5)
-                    logger.error(f"Sleeping for {t}s. Reason: {out['status']}")
+                    logger.info(f"MSA processing in progress, waiting {t}s. Status: {out.get('status', 'UNKNOWN')}")
                     time.sleep(t)
                     out = status(ID)
                     pbar.set_description(out["status"])

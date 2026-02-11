@@ -136,6 +136,10 @@ def compute_msa(
     msa_server_url: str,
     msa_pairing_strategy: str,
     use_pairing=True,
+    msa_server_username: str = None,
+    msa_server_password: str = None,
+    api_key_header: str = "X-API-Key",
+    api_key_value: str = None,
 ) -> None:
     """Compute the MSA for the input data.
 
@@ -151,8 +155,20 @@ def compute_msa(
         The MSA server URL.
     msa_pairing_strategy : str
         The MSA pairing strategy.
+    use_pairing : bool, optional
+        Whether to use pairing, by default True.
+    msa_server_username : str, optional
+        Username for basic authentication to MSA server.
+    msa_server_password : str, optional
+        Password for basic authentication to MSA server.
+    api_key_header : str, optional
+        Header name for API key authentication, by default "X-API-Key".
+    api_key_value : str, optional
+        API key value for authentication to MSA server.
 
     """
+    logger.info(f"Starting MSA generation for target '{target_id}' with {len(data)} sequences")
+    
     if len(data) > 1 and use_pairing:
         paired_msas = run_mmseqs2(
             list(data.values()),
@@ -161,6 +177,10 @@ def compute_msa(
             use_pairing=True,
             host_url=msa_server_url,
             pairing_strategy=msa_pairing_strategy,
+            msa_server_username=msa_server_username,
+            msa_server_password=msa_server_password,
+            api_key_header=api_key_header,
+            api_key_value=api_key_value,
         )
     else:
         paired_msas = [""] * len(data)
@@ -172,6 +192,10 @@ def compute_msa(
         use_pairing=False,
         host_url=msa_server_url,
         pairing_strategy=msa_pairing_strategy,
+        msa_server_username=msa_server_username,
+        msa_server_password=msa_server_password,
+        api_key_header=api_key_header,
+        api_key_value=api_key_value,
     )
 
     for idx, name in enumerate(data):
@@ -328,6 +352,10 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     max_msa_seqs: int = 4096,
     use_msa_server: bool = False,
     use_pairing: bool = True,
+    msa_server_username: str = None,
+    msa_server_password: str = None,
+    api_key_header: str = "X-API-Key",
+    api_key_value: str = None,
 ) -> None:
     """Process the input data and output directory.
 
@@ -343,6 +371,14 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
         Max number of MSA sequences, by default 4096.
     use_msa_server : bool, optional
         Whether to use the MMSeqs2 server for MSA generation, by default False.
+    msa_server_username : str, optional
+        Username for basic authentication to MSA server.
+    msa_server_password : str, optional
+        Password for basic authentication to MSA server.
+    api_key_header : str, optional
+        Header name for API key authentication, by default "X-API-Key".
+    api_key_value : str, optional
+        API key value for authentication to MSA server.
 
     Returns
     -------
@@ -485,6 +521,10 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
                     msa_server_url=msa_server_url,
                     msa_pairing_strategy=msa_pairing_strategy,
                     use_pairing=use_pairing,
+                    msa_server_username=msa_server_username,
+                    msa_server_password=msa_server_password,
+                    api_key_header=api_key_header,
+                    api_key_value=api_key_value,
                 )
 
             # Parse MSA data
