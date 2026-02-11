@@ -19,7 +19,7 @@ if command -v aria2c &> /dev/null; then
     aria2c -c -x 10 -s 10 -k 1M -o cache_data/ccd.pkl https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/ccd.pkl
     aria2c -c -x 10 -s 10 -k 1M -o cache_data/unique_protein_sequences.fasta https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/unique_protein_sequences.fasta
     aria2c -c -x 10 -s 10 -k 1M -o cache_data/unique_nucleic_acid_sequences.fasta https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/unique_nucleic_acid_sequences.fasta
-    aria2c -c -x 10 -s 10 -k 1M -o protein_id_groups.json https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/protein_id_groups.json
+    aria2c -c -x 10 -s 10 -k 1M -o cache_data/protein_id_groups.json https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/protein_id_groups.json
     aria2c -c -x 10 -s 10 -k 1M -o cache_data/nucleic_acid_id_groups.json https://${HF_ENDPOINT}/intelligenAI/intellifold/resolve/main/nucleic_acid_id_groups.json
 
 else
