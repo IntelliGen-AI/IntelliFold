@@ -7,11 +7,13 @@
     cd IntelliFold
     ```
 
-2. **Create and activate the environment(recommended)**
+2. **Create and activate the environment**
     ```bash
     conda env create -f environment.yaml
     conda activate intellifold
     ```
+
+   This is the standard install path for the default dependency stack.
 
 3. **Install the package**
     - From PyPI (recommended):
@@ -26,6 +28,26 @@
       ```bash
       pip install -e .
       ```
+
+   **Newer NVIDIA GPUs**
+
+   On newer GPU architectures, avoid the default torch install path in `environment.yaml`. Instead, create a minimal environment first, then install a PyTorch build that already supports your device before installing IntelliFold. For example, on Blackwell GPUs:
+
+   ```bash
+   conda create -n intellifold python=3.11 mmseqs2 pip -c conda-forge -c bioconda
+   conda activate intellifold
+   ```
+
+   ```bash
+   pip install --index-url https://download.pytorch.org/whl/cu128 torch torchvision torchaudio
+   pip install -e .
+   ```
+
+   If you want to use the optional DeepSpeed DS4Sci attention kernels, install the extra dependency after the base package:
+
+   ```bash
+   pip install -e .[deepspeed]
+   ```
 
 4. **(Optional) Download IntelliFold Cache Data Manually**<br>
     By default, model weights and CCD data are downloaded automatically(the directory is `~/.intellifold`) when you run the inference. But you can also download by yourself.

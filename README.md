@@ -47,6 +47,8 @@ intellifold predict ./examples/5S8I_A.yaml --out_dir ./output --cache ./cache_da
 
 To more complete installation instructions and usage, please refer to the [Installation Guide](docs/installation.md).
 
+> **Note**: On newer NVIDIA GPU architectures, install a PyTorch build that already supports your device before installing IntelliFold. DeepSpeed is only required for the optional DS4Sci attention kernels.
+
 
 ## 🔍 Inference
 
@@ -114,4 +116,3 @@ The IntelliFold project, including code and model parameters, is made available 
 ## 📬 Contact Us
 
 If you have any questions or are interested in collaboration, please feel free to contact us at contact@intfold.com.
-

@@ -18,8 +18,30 @@ import os
 from torch.utils.cpp_extension import load
 
 
+def _cuda_arch_flags():
+    raw = os.environ.get("TORCH_CUDA_ARCH_LIST")
+    if not raw:
+        return []
+
+    flags = []
+    for entry in raw.replace(",", ";").split(";"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        wants_ptx = entry.endswith("+PTX")
+        entry = entry.removesuffix("+PTX").replace("sm_", "").replace("compute_", "")
+        if "." in entry:
+            major, minor = entry.split(".", 1)
+            arch = f"{major}{minor}"
+        else:
+            arch = entry
+        flags.extend(["-gencode", f"arch=compute_{arch},code=sm_{arch}"])
+        if wants_ptx:
+            flags.extend(["-gencode", f"arch=compute_{arch},code=compute_{arch}"])
+    return flags
+
+
 def compile(name, sources, extra_include_paths, build_directory):
-    os.environ["TORCH_CUDA_ARCH_LIST"] = "7.0;8.0"
     return load(
         name=name,
         sources=sources,
@@ -42,14 +64,7 @@ def compile(name, sources, extra_include_paths, build_directory):
             "-U__CUDA_NO_HALF_CONVERSIONS__",
             "--expt-relaxed-constexpr",
             "--expt-extended-lambda",
-            "-gencode",
-            "arch=compute_70,code=sm_70",
-            "-gencode",
-            "arch=compute_80,code=sm_80",
-            "-gencode",
-            "arch=compute_86,code=sm_86",
-            "-gencode",
-            "arch=compute_90,code=sm_90",
+            *_cuda_arch_flags(),
         ],
         verbose=True,
         build_directory=build_directory,
