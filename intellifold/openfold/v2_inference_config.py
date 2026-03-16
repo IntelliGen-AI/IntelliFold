@@ -3,6 +3,7 @@ import copy
 import importlib
 import ml_collections as mlc
 import os
+from intellifold.openfold.utils.kernel.deepspeed_compat import resolve_ds4s_request
 
 def model_config(
     low_prec=False, 
@@ -29,7 +30,7 @@ def get_model_config(args):
     
     is_low_precision = True
     if os.environ.get("USE_DEEPSPEED_EVO_ATTENTION", False) == "true":
-        use_deepspeed_evoformer_attention = True
+        use_deepspeed_evoformer_attention = resolve_ds4s_request(True)
         cutlass_path_env = os.getenv("CUTLASS_PATH", None)
         msg = (
                 "if use ds4sci, set `CUTLASS_PATH` environment variable according to the instructions at https://www.deepspeed.ai/tutorials/ds4sci_evoformerattention/. \n"
@@ -37,9 +38,10 @@ def get_model_config(args):
                 "git clone -b v3.5.1 https://github.com/NVIDIA/cutlass.git  /path/to/cutlass \n"
                 "export CUTLASS_PATH=/path/to/cutlass \n"
             )
-        assert (
-            cutlass_path_env is not None and os.path.exists(cutlass_path_env)
-        ), msg
+        if use_deepspeed_evoformer_attention:
+            assert (
+                cutlass_path_env is not None and os.path.exists(cutlass_path_env)
+            ), msg
     else:
         use_deepspeed_evoformer_attention = False
     

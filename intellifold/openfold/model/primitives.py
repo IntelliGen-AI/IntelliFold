@@ -11,15 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import importlib
 import math
 from typing import Optional, Callable, List, Tuple
 import numpy as np
 
-deepspeed_is_installed = importlib.util.find_spec("deepspeed") is not None
-ds4s_is_installed = deepspeed_is_installed and importlib.util.find_spec("deepspeed.ops.deepspeed4science") is not None
-if deepspeed_is_installed:
-    import deepspeed
+from intellifold.openfold.utils.kernel.deepspeed_compat import detect_deepspeed_status
+
+deepspeed_is_installed, ds4s_is_installed = detect_deepspeed_status(
+    warn_on_import_error=True
+)
 
 if ds4s_is_installed:
     from intellifold.openfold.utils.kernel.traceable_evoformer_attn import DS4Sci_EvoformerAttention
