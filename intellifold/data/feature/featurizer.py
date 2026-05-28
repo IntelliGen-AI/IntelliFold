@@ -759,6 +759,7 @@ def process_atom_features(
     max_atoms: Optional[int] = None,
     max_tokens: Optional[int] = None,
     generator: Optional[torch.Generator] = None,
+    per_residue_augment: bool = True,
 ) -> dict[str, Tensor]:
     """Get the atom features.
 
@@ -922,10 +923,30 @@ def process_atom_features(
     center = center / resolved_mask.sum().clamp(min=1)
     coords = coords - center[:, None]
 
-    # Apply random roto-translation to the input atoms
-    ref_pos = center_random_augmentation(
-        ref_pos[None], resolved_mask[None], centering=False, generator=generator
-    )[0]
+    # Apply random roto-translation to the input atoms.
+    # When per_residue_augment is True (default) we apply an independent
+    # rotation+translation to each unique residue, matching PV's data
+    # pipeline behaviour (matters for multi-seed inference because more
+    # unique random frames per sample = more ensemble diversity). When
+    # False, a single global rotation+translation is shared across all
+    # atoms (legacy Boltz-style behaviour).
+    if per_residue_augment:
+        # Group atoms by ref_space_uid (unique per (chain_idx, res_id)).
+        unique_uids = torch.unique(ref_space_uid)
+        for uid in unique_uids.tolist():
+            sel = (ref_space_uid == uid)
+            if not sel.any():
+                continue
+            sub_pos = ref_pos[sel].unsqueeze(0)
+            sub_mask = resolved_mask[sel].unsqueeze(0).to(sub_pos.dtype)
+            augmented = center_random_augmentation(
+                sub_pos, sub_mask, centering=True, generator=generator
+            )
+            ref_pos[sel] = augmented[0]
+    else:
+        ref_pos = center_random_augmentation(
+            ref_pos[None], resolved_mask[None], centering=False, generator=generator
+        )[0]
 
     # Compute padding and apply
     if max_atoms is not None:
@@ -1241,6 +1262,7 @@ class BoltzFeaturizer:
         inference_pocket: Optional[list[tuple[int, int]]] = None,
         compute_constraint_features: bool = False,
         generator: Optional[torch.Generator] = None,
+        per_residue_augment: bool = True,
     ) -> dict[str, Tensor]:
         """Compute features.
 
@@ -1291,6 +1313,7 @@ class BoltzFeaturizer:
             max_atoms,
             max_tokens,
             generator=generator,
+            per_residue_augment=per_residue_augment,
         )
 
         # Compute MSA features
