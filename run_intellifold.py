@@ -251,6 +251,7 @@ def main(args):
         msa_dir=processed.msa_dir,
         template_dir=processed.template_dir if args.use_template else None,
         constraints_dir=processed.constraints_dir,
+        seed=seeds[0],
     )
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

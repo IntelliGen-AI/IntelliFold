@@ -226,12 +226,12 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
 
     # Keep track of the sequences available per chain, keeping the original
     # order of the sequences in the MSA to favor the best matching sequences
-    visited = {(c, s) for c, items in taxonomy_map for s in items}
+    # Include ALL non-query sequences in available pool.
+    # In PV, unpaired MSA is a separate search (not excluding paired sequences),
+    # so we keep the pool maximized to avoid single-chain gap rows.
     available = {}
     for c in chain_ids:
-        available[c] = [
-            i for i in range(1, len(msa[c].sequences)) if (c, i) not in visited
-        ]
+        available[c] = list(range(1, len(msa[c].sequences)))
 
     # Create sequence pairs
     is_paired = []
@@ -249,33 +249,28 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
         for chain_id, seq_idx in pairs:
             chain_occurences.setdefault(chain_id, []).append(seq_idx)
 
-        # We create as many pairings as the maximum number of occurences
-        max_occurences = max(len(v) for v in chain_occurences.values())
-        for i in range(max_occurences):
+        # We create as many pairings as the minimum number of occurences
+        # (matching PV's min_hits_per_species behavior: crop to smallest MSA)
+        min_occurences = min(len(v) for v in chain_occurences.values())
+        for i in range(min_occurences):
             row_pairing = {}
             row_is_paired = {}
 
             # Add the chains present in the taxonomy
             for chain_id, seq_idxs in chain_occurences.items():
-                # Roll over the sequence index to maximize diversity
-                idx = i % len(seq_idxs)
-                seq_idx = seq_idxs[idx]
+                # Direct index (safe since i < min_occurences <= len(seq_idxs))
+                seq_idx = seq_idxs[i]
 
                 # Add the sequence to the pairing
                 row_pairing[chain_id] = seq_idx
                 row_is_paired[chain_id] = 1
 
-            # Add any missing chains
+            # Add any missing chains as gaps (matching PV behavior:
+            # chains without alignment for this species get gap tokens)
             for chain_id in chain_ids:
                 if chain_id not in row_pairing:
                     row_is_paired[chain_id] = 0
-                    if available[chain_id]:
-                        # Add the next available sequence
-                        seq_idx = available[chain_id].pop(0)
-                        row_pairing[chain_id] = seq_idx
-                    else:
-                        # No more sequences available, we place a gap
-                        row_pairing[chain_id] = -1
+                    row_pairing[chain_id] = -1
 
             pairing.append(row_pairing)
             is_paired.append(row_is_paired)
@@ -426,22 +421,59 @@ def prepare_msa_arrays(
     )
     
     ########## ADDITIONAL FEATURES ##########
-    # Get the mean of the deletions for each chain and add it to the del_data
+    # Compute del_mean and profile from UNPAIRED sequences only (taxonomy == -1),
+    # matching PV where these are computed from the unpaired per-chain MSA.
     del_mean = np.zeros(len(token_asym_ids_arr), dtype=np.float32)
     profile = np.zeros((len(token_asym_ids_arr), const.num_tokens), dtype=np.float64)
-    for unique_chain_id in np.unique(token_asym_ids_arr):
-        token_indices = np.where(token_asym_ids_arr == unique_chain_id)[0]
-        del_mean[token_indices] = del_data[token_indices, :msa_valid_depths[unique_chain_id]].mean(axis=1)
     
-    for unique_chain_id in np.unique(token_asym_ids_arr):
-        token_indices = np.where(token_asym_ids_arr == unique_chain_id)[0]
-        msa_data_chain = msa_data[token_indices, :msa_valid_depths[unique_chain_id]]
-        msa_data_chain = msa_data_chain.transpose(1,0)
-        msa_data_chain  = torch.tensor(msa_data_chain, dtype=torch.long)
-        # Prepare features
-        msa_data_chain = torch.nn.functional.one_hot(msa_data_chain, num_classes=const.num_tokens)
-        profile_chain = msa_data_chain.float().mean(dim=0)
-        profile[token_indices] = profile_chain
+    gap_token = const.mapping_boltz_token_ids_to_our_token_ids[const.token_ids["-"]]
+    
+    for chain_idx, chain_id in enumerate(chain_ids):
+        token_indices = np.where(token_asym_ids_arr == chain_id)[0]
+        if len(token_indices) == 0:
+            continue
+        
+        n_tokens_chain = len(token_indices)
+        token_res_idxs = token_res_idxs_arr[token_indices]
+        
+        # Get only UNPAIRED sequences (taxonomy == -1) for this chain
+        # PV computes profile/del_mean from the unpaired MSA (separate A3M search).
+        # In OS, unpaired sequences are those with key=-1 in CSV, stored as taxonomy=-1.
+        chain_msa_obj = msa[chain_id]
+        unpaired_seq_indices = [
+            int(s["seq_idx"]) for s in chain_msa_obj.sequences if s["taxonomy"] == -1
+        ]
+        # Always include query sequence (seq_idx=0)
+        if 0 not in unpaired_seq_indices:
+            unpaired_seq_indices = [0] + unpaired_seq_indices
+        
+        depth = len(unpaired_seq_indices)
+        if depth == 0:
+            continue
+        
+        # Build per-chain MSA matrix and deletion matrix from unpaired sequences only
+        chain_msa_matrix = np.full((depth, n_tokens_chain), gap_token, dtype=np.int64)
+        chain_del_matrix = np.zeros((depth, n_tokens_chain), dtype=np.float32)
+        
+        for row_idx, seq_idx in enumerate(unpaired_seq_indices):
+            res_start = msa_sequences[chain_idx, seq_idx]
+            if res_start == -1:
+                continue
+            for t_idx, res_idx in enumerate(token_res_idxs):
+                res_type = msa_residues[chain_idx, res_start + res_idx]
+                chain_msa_matrix[row_idx, t_idx] = res_type
+                k = (chain_id, seq_idx, int(res_idx))
+                if k in deletions:
+                    chain_del_matrix[row_idx, t_idx] = deletions[k]
+        
+        # Compute deletion_mean: mean over unpaired MSA rows per position
+        del_mean[token_indices] = chain_del_matrix.mean(axis=0)
+        
+        # Compute profile: mean of one-hot over unpaired MSA rows per position
+        chain_msa_tensor = torch.tensor(chain_msa_matrix, dtype=torch.long)
+        chain_msa_onehot = torch.nn.functional.one_hot(chain_msa_tensor, num_classes=const.num_tokens)
+        profile_chain = chain_msa_onehot.float().mean(dim=0)
+        profile[token_indices] = profile_chain.numpy()
     ########## ADDITIONAL FEATURES ##########
     
     
@@ -726,6 +758,7 @@ def process_atom_features(
     num_bins: int = 64,
     max_atoms: Optional[int] = None,
     max_tokens: Optional[int] = None,
+    generator: Optional[torch.Generator] = None,
 ) -> dict[str, Tensor]:
     """Get the atom features.
 
@@ -891,7 +924,7 @@ def process_atom_features(
 
     # Apply random roto-translation to the input atoms
     ref_pos = center_random_augmentation(
-        ref_pos[None], resolved_mask[None], centering=False
+        ref_pos[None], resolved_mask[None], centering=False, generator=generator
     )[0]
 
     # Compute padding and apply
@@ -1207,6 +1240,7 @@ class BoltzFeaturizer:
         inference_binder: Optional[int] = None,
         inference_pocket: Optional[list[tuple[int, int]]] = None,
         compute_constraint_features: bool = False,
+        generator: Optional[torch.Generator] = None,
     ) -> dict[str, Tensor]:
         """Compute features.
 
@@ -1256,6 +1290,7 @@ class BoltzFeaturizer:
             num_bins,
             max_atoms,
             max_tokens,
+            generator=generator,
         )
 
         # Compute MSA features

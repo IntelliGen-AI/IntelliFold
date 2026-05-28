@@ -29,8 +29,13 @@ import torch.nn.functional as F
 from torch.types import Device
 
 
-def randomly_rotate(coords, return_second_coords=False, second_coords=None):
-    R = random_rotations(len(coords), coords.dtype, coords.device)
+def randomly_rotate(
+    coords,
+    return_second_coords=False,
+    second_coords=None,
+    generator: Optional[torch.Generator] = None,
+):
+    R = random_rotations(len(coords), coords.dtype, coords.device, generator=generator)
 
     if return_second_coords:
         return torch.einsum("bmd,bds->bms", coords, R), (
@@ -60,6 +65,7 @@ def center_random_augmentation(
     centering=True,
     return_second_coords=False,
     second_coords=None,
+    generator: Optional[torch.Generator] = None,
 ):
     """Center and randomly augment the input coordinates.
 
@@ -75,6 +81,9 @@ def center_random_augmentation(
         Whether to add rotational and translational augmentation the input, by default True
     centering : bool, optional
         Whether to center the input, by default True
+    generator : torch.Generator, optional
+        Optional torch.Generator for reproducible rotation/translation.
+        When None, falls back to the default global torch RNG.
 
     Returns
     -------
@@ -94,9 +103,14 @@ def center_random_augmentation(
 
     if augmentation:
         atom_coords, second_coords = randomly_rotate(
-            atom_coords, return_second_coords=True, second_coords=second_coords
+            atom_coords,
+            return_second_coords=True,
+            second_coords=second_coords,
+            generator=generator,
         )
-        random_trans = torch.randn_like(atom_coords[:, 0:1, :]) * s_trans
+        # Use empty_like().normal_(generator=...) instead of torch.randn_like
+        # because the latter does not accept a generator argument.
+        random_trans = torch.empty_like(atom_coords[:, 0:1, :]).normal_(generator=generator) * s_trans
         atom_coords = atom_coords + random_trans
 
         if second_coords is not None:
@@ -161,7 +175,10 @@ def quaternion_to_matrix(quaternions: torch.Tensor) -> torch.Tensor:
 
 
 def random_quaternions(
-    n: int, dtype: Optional[torch.dtype] = None, device: Optional[Device] = None
+    n: int,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[Device] = None,
+    generator: Optional[torch.Generator] = None,
 ) -> torch.Tensor:
     """
     Generate random quaternions representing rotations,
@@ -172,20 +189,25 @@ def random_quaternions(
         dtype: Type to return.
         device: Desired device of returned tensor. Default:
             uses the current device for the default tensor type.
+        generator: Optional torch.Generator. If given, randn samples are
+            drawn from this generator (so the result is reproducible).
 
     Returns:
         Quaternions as tensor of shape (N, 4).
     """
     if isinstance(device, str):
         device = torch.device(device)
-    o = torch.randn((n, 4), dtype=dtype, device=device)
+    o = torch.randn((n, 4), dtype=dtype, device=device, generator=generator)
     s = (o * o).sum(1)
     o = o / _copysign(torch.sqrt(s), o[:, 0])[:, None]
     return o
 
 
 def random_rotations(
-    n: int, dtype: Optional[torch.dtype] = None, device: Optional[Device] = None
+    n: int,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[Device] = None,
+    generator: Optional[torch.Generator] = None,
 ) -> torch.Tensor:
     """
     Generate random rotations as 3x3 rotation matrices.
@@ -195,9 +217,10 @@ def random_rotations(
         dtype: Type to return.
         device: Device of returned tensor. Default: if None,
             uses the current device for the default tensor type.
+        generator: Optional torch.Generator for reproducibility.
 
     Returns:
         Rotation matrices as tensor of shape (n, 3, 3).
     """
-    quaternions = random_quaternions(n, dtype=dtype, device=device)
+    quaternions = random_quaternions(n, dtype=dtype, device=device, generator=generator)
     return quaternion_to_matrix(quaternions)

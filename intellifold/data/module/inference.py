@@ -406,6 +406,8 @@ def transform(
     pad_ref_element = torch.zeros((1, token_len, max_atoms_per_token, 128),
                         device=ref_element.device, 
                         dtype=ref_element.dtype)
+    # Initialize padded slots to one-hot at class 0 (matches PV convention).
+    pad_ref_element[..., 0] = 1
     for token_idx in range(token_len):
         mask = (atom_token_indices[0] == token_idx)  
         current_elements = ref_element[0, mask]  
@@ -413,8 +415,10 @@ def transform(
         if num_atoms > 0:
             pad_ref_element[0, token_idx, :num_atoms] = current_elements
     pad_ref_element = F.pad(pad_ref_element, (0, 0, 0, 0, 0, padded_token_length - token_len), 'constant', 0)
-    
-    
+    # Re-apply class-0 one-hot for newly padded tokens (F.pad left them all-zero).
+    pad_ref_element[:, token_len:, :, 0] = 1
+
+
     ref_charge = boltz_input_features['ref_charge'][atom_pad_mask==1].unsqueeze(0)  # [1, 1502]
     pad_ref_charge = torch.zeros((1, token_len, max_atoms_per_token), 
                         device=ref_charge.device, 
@@ -432,6 +436,8 @@ def transform(
     pad_ref_atom_name_chars = torch.zeros((1, token_len, max_atoms_per_token, 4, 64),
                                     device=ref_atom_name_chars.device,
                                     dtype=ref_atom_name_chars.dtype)
+    # Initialize padded slots to one-hot at class 0 (matches PV convention).
+    pad_ref_atom_name_chars[..., 0] = 1
     for token_idx in range(token_len):  
         # get the atom indices for the current token
         mask = (atom_token_indices[0] == token_idx) 
@@ -443,6 +449,8 @@ def transform(
     pad_ref_atom_name_chars = F.pad(pad_ref_atom_name_chars, 
                                     (0, 0, 0, 0, 0, 0, 0, padded_token_length - token_len), 
                                     'constant', 0)
+    # Re-apply class-0 one-hot for newly padded tokens.
+    pad_ref_atom_name_chars[:, token_len:, :, :, 0] = 1
 
 
     ref_space_uid = boltz_input_features['ref_space_uid'][atom_pad_mask==1].unsqueeze(0)  
@@ -586,6 +594,7 @@ def transform(
     input_features['N_tokens'] = torch.tensor(total_tokens)
     input_features['N_atoms'] = input_features['atom_nums'].sum()
     input_features['N_alignments'] = input_features['num_alignments'].squeeze(0)
+
     
     return input_features
         
@@ -727,6 +736,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         template_dir: Optional[Path] = None,
         use_template: bool = False,
         constraints_dir: Optional[Path] = None,
+        seed: Optional[int] = None,
     ) -> None:
         """Initialize the training dataset.
 
@@ -749,6 +759,10 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.constraints_dir = constraints_dir
         self.tokenizer = BoltzTokenizer()
         self.featurizer = BoltzFeaturizer()
+        # Optional dataset-wide base seed; per-sample generator is derived from
+        # (self.seed, idx) inside __getitem__ to make reference-pos augmentation
+        # reproducible.
+        self.seed = seed
 
     def __getitem__(self, idx: int) -> dict:
         """Get an item from the dataset.
@@ -772,6 +786,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         except Exception as e:  # noqa: BLE001
             print(f"Failed to load input for {record.id} with error {e}. Skipping.")  # noqa: T201
             return self.__getitem__(0)
+
         # Tokenize structure
         try:
             tokenized = self.tokenizer.tokenize(input_data)
@@ -787,6 +802,12 @@ class PredictionDataset(torch.utils.data.Dataset):
             binders, pocket = options.binders, options.pocket
 
         # Compute features
+        # Derive a per-sample torch.Generator from the dataset seed so that
+        # reference-pos random augmentation is reproducible run-to-run.
+        feat_generator = None
+        if self.seed is not None:
+            feat_generator = torch.Generator()
+            feat_generator.manual_seed(int(self.seed) * 100003 + int(idx))
         try:
             features = self.featurizer.process(
                 tokenized,
@@ -800,6 +821,7 @@ class PredictionDataset(torch.utils.data.Dataset):
                 inference_binder=binders,
                 inference_pocket=pocket,
                 compute_constraint_features=True,
+                generator=feat_generator,
             )
         except Exception as e:  # noqa: BLE001
             print(f"Featurizer failed on {record.id} with error {e}. Skipping.")  # noqa: T201
@@ -843,6 +865,7 @@ def get_inference_dataloader(
     msa_dir: Path,
     template_dir: Optional[Path] = None,
     constraints_dir: Optional[Path] = None,
+    seed: Optional[int] = None,
 ) -> DataLoader:
     """Get the inference dataloader.
 
@@ -874,6 +897,7 @@ def get_inference_dataloader(
         template_dir=template_dir,
         use_template=args.use_template,
         constraints_dir=constraints_dir,
+        seed=seed,
     )
     
     dataloader = DataLoader(

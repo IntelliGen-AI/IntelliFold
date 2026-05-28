@@ -192,7 +192,12 @@ def convert_atom_name(name: str) -> tuple[int, int, int, int]:
     return tuple(name)
 
 
-def compute_3d_conformer(mol: Mol, version: str = "v3") -> bool:
+def compute_3d_conformer(
+    mol: Mol,
+    version: str = "v3",
+    use_uff: bool = False,
+    random_seed: Optional[int] = None,
+) -> bool:
     """Generate 3D coordinates using EKTDG method.
 
     Taken from `pdbeccdutils.core.component.Component`.
@@ -203,6 +208,13 @@ def compute_3d_conformer(mol: Mol, version: str = "v3") -> bool:
         The RDKit molecule to process
     version: str, optional
         The ETKDG version, defaults ot v3
+    use_uff: bool, optional
+        Whether to run UFFOptimizeMolecule after EmbedMolecule.
+        Defaults to False to match the private (training) pipeline,
+        which skips UFF optimization.
+    random_seed: int, optional
+        If provided, pin RDKit's ETKDG randomSeed so EmbedMolecule
+        produces a reproducible conformer.
 
     Returns
     -------
@@ -218,6 +230,8 @@ def compute_3d_conformer(mol: Mol, version: str = "v3") -> bool:
         options = AllChem.ETKDGv2()
 
     options.clearConfs = False
+    if random_seed is not None:
+        options.randomSeed = int(random_seed)
     conf_id = -1
 
     try:
@@ -232,7 +246,8 @@ def compute_3d_conformer(mol: Mol, version: str = "v3") -> bool:
             options.useRandomCoords = True
             conf_id = AllChem.EmbedMolecule(mol, options)
 
-        AllChem.UFFOptimizeMolecule(mol, confId=conf_id, maxIters=1000)
+        if use_uff:
+            AllChem.UFFOptimizeMolecule(mol, confId=conf_id, maxIters=1000)
 
     except RuntimeError:
         pass  # Force field issue here
@@ -476,7 +491,8 @@ def parse_ccd_residue(
     name: str,
     ref_mol: Mol,
     res_idx: int,
-    remove_oxt_atom: bool = False
+    remove_oxt_atom: bool = False,
+    drop_leaving_atoms: bool = False,
 ) -> Optional[ParsedResidue]:
     """Parse an MMCIF ligand.
 
@@ -562,7 +578,16 @@ def parse_ccd_residue(
         # Drop OXT atoms for non-canonical amino acids.
         if remove_oxt_atom and atom_name == 'OXT':
             continue
-        
+
+        # Generic leaving-atom drop: when this residue is connected to a
+        # neighbor in a ligand chain (e.g. glycosidic bond to the next sugar),
+        # the corresponding CCD leaving atoms (O1, etc.) must be removed.
+        # We rely on the leaving_atom flag stamped on each CCD atom.
+        if drop_leaving_atoms:
+            props = atom.GetPropsAsDict()
+            if props.get("leaving_atom") is True:
+                continue
+
         charge = atom.GetFormalCharge()
         element = atom.GetAtomicNum()
         ref_coords = conformer.GetAtomPosition(atom.GetIdx())
@@ -694,11 +719,20 @@ def parse_polymer(
         # Handle non-standard residues
         if res_corrected not in ref_res:
             ref_mol = components[res_corrected]
+            # Match the chain-type-aware leaving-atom logic used for canonical
+            # residues below: keep OXT only when the residue is the
+            # C-terminal of a non-cyclic protein chain.
+            is_last_in_chain = (res_idx == len(sequence) - 1)
+            keep_oxt = (
+                chain_type == const.chain_type_ids["PROTEIN"]
+                and (not cyclic)
+                and is_last_in_chain
+            )
             residue = parse_ccd_residue(
                 name=res_corrected,
                 ref_mol=ref_mol,
                 res_idx=res_idx,
-                remove_oxt_atom=True,  ### remove the OXT atom of modified residue
+                remove_oxt_atom=not keep_oxt,
             )
             parsed.append(residue)
             continue
@@ -711,9 +745,37 @@ def parse_polymer(
         ref_mol = AllChem.RemoveHs(ref_mol, sanitize=False)
         ref_conformer = get_conformer(ref_mol)
 
-        # Only use reference atoms set in constants
+        # Use the canonical const.ref_atoms list for the main residue atoms
+        # (this preserves backwards compatibility with code that indexes
+        # const.ref_atoms[res].index("N") / "CA" / etc.).
         ref_name_to_atom = {a.GetProp("name"): a for a in ref_mol.GetAtoms()}
         ref_atoms = [ref_name_to_atom[a] for a in const.ref_atoms[res_corrected]]
+
+        # Conditionally append non-hydrogen leaving atoms when the corresponding
+        # inter-residue bond is absent. Which residue receives the leaving atom
+        # depends on the chain type:
+        #   - PROTEIN: OXT is on the C-side, appended to the C-terminal residue
+        #     (last in the sequence).
+        #   - RNA / DNA: OP3 is on the 5'-side of the phosphate, appended to
+        #     the 5'-terminal residue (first in the sequence).
+        # Cyclic chains have both ends bonded, so no leaving atom is retained.
+        if not cyclic:
+            is_terminal_for_leaving = False
+            if chain_type == const.chain_type_ids["PROTEIN"]:
+                is_terminal_for_leaving = (res_idx == len(sequence) - 1)
+            elif chain_type in (const.chain_type_ids["RNA"], const.chain_type_ids["DNA"]):
+                is_terminal_for_leaving = (res_idx == 0)
+            if is_terminal_for_leaving:
+                for atom_name, ref_atom in ref_name_to_atom.items():
+                    if atom_name in const.ref_atoms[res_corrected]:
+                        continue
+                    # Skip hydrogens (they were already stripped by RemoveHs
+                    # above, but guard defensively).
+                    if ref_atom.GetAtomicNum() == 1:
+                        continue
+                    props = ref_atom.GetPropsAsDict()
+                    if props.get("leaving_atom") is True:
+                        ref_atoms.append(ref_atom)
 
         # Iterate, always in the same order
         atoms: list[ParsedAtom] = []
@@ -972,16 +1034,25 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 seq = [seq]
 
             residues = []
+            n_res_in_chain = len(seq)
+            # For multi-residue ligand chains (e.g. an N-linked glycan), every
+            # residue is bonded to another residue or to the polymer it is
+            # attached to (in a typical N-glycan the "leaf" sugar is still a
+            # branch off another sugar, not a free reducing end). We therefore
+            # drop the CCD leaving atoms (anomeric O1, etc.) for every residue
+            # in such chains. Single-residue ligand chains are treated as free
+            # molecules and keep their leaving atoms.
+            multi_residue_ligand = n_res_in_chain > 1
             for res_idx, code in enumerate(seq):
                 if code not in ccd:
                     msg = f"CCD component {code} not found!"
                     raise ValueError(msg)
 
-                # Parse residue
                 residue = parse_ccd_residue(
                     name=code,
                     ref_mol=ccd[code],
                     res_idx=res_idx,
+                    drop_leaving_atoms=multi_residue_ligand,
                 )
                 ### use gap token id for hard code ligand ccd type, for dummy msa, our model
                 residue = dataclasses.replace(residue,type=21) 
@@ -1063,6 +1134,66 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     if not chains:
         msg = "No chains parsed!"
         raise ValueError(msg)
+
+    # Apply YAML `constraints.bond` declarations to drop CCD leaving atoms.
+    # The user may declare an explicit inter-residue covalent bond such as
+    # a polymer-ligand attachment (N-glycan: Asn ND2 -- C1 of a sugar) or a
+    # covalent ligand attached to Cys SG. For each endpoint, any CCD-labelled
+    # leaving atom directly bonded to the declared central atom in that
+    # residue is removed (so subsequent featurisation does not emit it).
+    # This complements the chain-position heuristics applied during parsing
+    # by M5 and is necessary for single-residue ligand chains that *do* have
+    # an inter-residue bond (those would otherwise keep their O1 / leaving
+    # atoms because the chain length is 1).
+    _declared_constraints = schema.get("constraints", []) or []
+    if _declared_constraints:
+        # Deep-copy each chain so per-chain leaving-atom drops never bleed
+        # across chains that share the same ParsedChain template from the
+        # sequence-grouping step above. Using deepcopy unconditionally keeps
+        # this block independent of Python builtin shadowing later in this
+        # function.
+        import copy as _copy
+        chains = {_cid: _copy.deepcopy(_ch) for _cid, _ch in chains.items()}
+
+        def _leaving_atoms_for_central(ref_mol, central_atom_name):
+            """Return list of leaving atom names directly bonded to the named
+            central atom in this CCD Mol (excludes H)."""
+            leaving_names = []
+            for a in ref_mol.GetAtoms():
+                if a.GetProp("name") != central_atom_name:
+                    continue
+                for nb in a.GetNeighbors():
+                    if nb.GetAtomicNum() == 1:
+                        continue
+                    if nb.GetPropsAsDict().get("leaving_atom") is True:
+                        leaving_names.append(nb.GetProp("name"))
+                break
+            return leaving_names
+
+        for _c in _declared_constraints:
+            if "bond" not in _c:
+                continue
+            for _endpoint_key in ("atom1", "atom2"):
+                _ep = _c["bond"].get(_endpoint_key)
+                if _ep is None:
+                    continue
+                _chain_name, _res_idx_1, _central_name = _ep
+                _chain = chains.get(_chain_name)
+                if _chain is None:
+                    continue
+                _res_idx_0 = int(_res_idx_1) - 1
+                if _res_idx_0 < 0 or _res_idx_0 >= len(_chain.residues):
+                    continue
+                _residue = _chain.residues[_res_idx_0]
+                _ref_mol = ccd.get(_residue.name)
+                if _ref_mol is None:
+                    continue
+                _drop = set(_leaving_atoms_for_central(_ref_mol, _central_name))
+                if not _drop:
+                    continue
+                _new_atoms = [a for a in _residue.atoms if a.name not in _drop]
+                if len(_new_atoms) != len(_residue.atoms):
+                    _chain.residues[_res_idx_0] = dataclasses.replace(_residue, atoms=_new_atoms)
 
     # Create tables
     atom_data = []

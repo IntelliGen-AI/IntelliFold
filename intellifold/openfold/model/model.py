@@ -72,7 +72,7 @@ class IntelliFold(nn.Module):
         t = torch.linspace(0, 1, T + 1, device = device)
 
         t = sigma_data * (s_max ** inv_rho + t * (s_min ** inv_rho - s_max ** inv_rho)) ** rho
-        t = torch.cat([t, torch.zeros_like(t[:1])]) 
+        #         t = torch.cat([t, torch.zeros_like(t[:1])]) 
         return  t
 
     @torch.no_grad()
@@ -101,9 +101,7 @@ class IntelliFold(nn.Module):
         step_scale_eta = self.sample_config.step_scale_eta
         
         T = len(noise_schedule_c) - 1
-        x = noise_schedule_c[0] * torch.empty_like(input_features['ref_pos'],device = input_features['ref_pos'].device).normal_(generator = self.generator)
-        
-        x = einops.repeat(x, 'b ... -> (b n) ...', n = diffusion_batch_size)
+        x = noise_schedule_c[0] * torch.empty_like(einops.repeat(input_features["ref_pos"], "b ... -> (b n) ...", n = diffusion_batch_size),device = input_features["ref_pos"].device).normal_(generator = self.generator)
         pred_dense_atom_mask = input_features['pred_dense_atom_mask']
         if self.advanced_conversion:
             [aggregated_pred_dense_atom_mask], _ = aggregate_fn_advanced([pred_dense_atom_mask], pred_dense_atom_mask)
@@ -143,6 +141,7 @@ class IntelliFold(nn.Module):
             dt = c_tau - t
             
             x = x_noisy + step_scale_eta * dt * delta
+
         
         return x
         

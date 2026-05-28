@@ -19,6 +19,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import string
 from pathlib import Path
 from typing import Optional
 
@@ -57,7 +58,12 @@ def parse_csv(
         raise ValueError(msg)
 
     # Create taxonomy mapping
-    visited = set()
+    # Dedup SEPARATELY for paired (key>=0) and unpaired (key==-1) sequences.
+    # PV deduplicates each A3M independently; paired and unpaired are separate files.
+    # Cross-dedup happens later in PV (after profile/deletion_mean are computed).
+    _deletion_table = str.maketrans("", "", string.ascii_lowercase)
+    visited_paired = set()
+    visited_unpaired = set()
     sequences = []
     deletions = []
     residues = []
@@ -74,10 +80,13 @@ def parse_csv(
         if (str(key) != "nan") and (key is not None) and (key != ""):
             taxonomy_id = key
 
-        # Skip if duplicate sequence
-        str_seq = line.replace("-", "").upper()
-        if str_seq not in visited:
-            visited.add(str_seq)
+        # Skip if duplicate sequence within same group (paired vs unpaired).
+        # Matching PV dedup: remove lowercase insertions, keep uppercase + gaps.
+        str_seq = line.translate(_deletion_table)
+        is_unpaired = (taxonomy_id == -1)
+        visited_set = visited_unpaired if is_unpaired else visited_paired
+        if str_seq not in visited_set:
+            visited_set.add(str_seq)
         else:
             continue
 
