@@ -1,0 +1,25 @@
+IntelliFold
+Copyright 2026 IntelliGen-AI and/or its affiliates.
+
+This product includes software developed by DeepMind Technologies Limited as part
+of AlphaFold 3 (https://github.com/google-deepmind/alphafold3), licensed under the
+Apache License, Version 2.0.
+
+  * third_party/alphafold3/ is a verbatim copy of AlphaFold 3 v3.0.3 (Copyright
+    2024 DeepMind Technologies Limited; Apache-2.0), with the original per-file
+    license headers and the repository's LICENSE/OUTPUT_TERMS/WEIGHTS_TERMS files
+    retained unmodified. The bundled src/alphafold3/test_data/ fixtures were
+    omitted; no other files were changed.
+  * intellifold/run_jax_inference.py is a MODIFIED copy of AlphaFold 3's
+    run_alphafold.py (Copyright 2024 DeepMind Technologies Limited; Apache-2.0).
+    Modifications by IntelliGen-AI, 2026 -- see the modification notice in the
+    file header. The modifications are env-gated and preserve unpatched behaviour.
+
+This repository vendors and targets the Apache-2.0 release of AlphaFold 3 (v3.0.3).
+It does NOT use, include, or depend on the earlier v3.0.1/v3.0.2 releases, which
+are licensed CC BY-NC-SA 4.0 (non-commercial).
+
+The AlphaFold 3 model parameters ("weights") and outputs generated with them are
+NOT included here and are governed by separate non-commercial terms
+(https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md).
+This repository ships only IntelliGen-AI's own IntelliFold-v2 weights.

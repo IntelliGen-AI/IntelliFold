@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "intellifold"
+version = "2.0.2"
+description = "IntelliFold-v2 on the AlphaFold 3 JAX inference engine."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "IntelliGen-AI", email = "contact@intfold.com" }]
+keywords = ["protein structure", "alphafold3", "intellifold", "jax", "inference"]
+dependencies = [
+    "numpy",
+    "zstandard",
+    "ml_dtypes",
+    # NOTE: the AlphaFold 3 JAX engine is NOT listed here -- it is vendored in
+    # third_party/alphafold3/ (Apache-2.0, v3.0.3) and installed explicitly first:
+    #     pip install ./third_party/alphafold3
+    # so the repo is self-contained and the build can never resolve to the
+    # non-commercial v3.0.1/v3.0.2. Building AF3 needs a C++ toolchain
+    # (cmake/ninja/compiler) + CUDA; it pulls jax[cuda12]==0.9.1 and needs py>=3.12.
+]
+
+[project.optional-dependencies]
+# Weight conversion (convert_ifv2_to_jax.py) additionally needs torch to read the
+# .pt checkpoints. The native PyTorch inference stack also needs torch.
+convert = ["torch"]
+
+[project.scripts]
+intellifold = "intellifold.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/IntelliGen-AI/IntelliFold"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["intellifold*", "runner*"]
+
+[tool.setuptools.package-data]
+intellifold = ["af3_schema.pkl", "openfold/utils/layer_norm/kernel/*"]

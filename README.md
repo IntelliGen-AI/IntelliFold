@@ -15,8 +15,9 @@
 
 ![IntelliFold Model](assets/Intellifold-Model-Arc.png)
 
-## 🎉 New Model Release
+## 📰 News
 
+ - **2026-06-15**: IntelliFold-v2 now runs on the **[AlphaFold 3](https://github.com/google-deepmind/alphafold3) JAX engine**. AlphaFold 3's JAX inference is fast, and as of [**v3.0.3** it is released under the **Apache-2.0** license](https://github.com/google-deepmind/alphafold3/releases/tag/v3.0.3) — so we leverage their repository to accelerate IntelliFold-2 inference. See [Usage](#-usage) to install and run.
  - **2026-02-07**: We are excited to present [[IntelliFold 2]](https://www.biorxiv.org/content/10.64898/2026.02.09.704787v1). This version represents a
 major architectural update and is one of the first open-source models to outperform AlphaFold3 on
 Foldbench.  
@@ -30,43 +31,79 @@ For more details on the benchmarking process and results, please refer to our re
 ![Benchmark Metrics](assets/Intellifold_v2_performance.png)
 
 
-## 🚀 Quick Start
+## 🔍 Usage
 
-To quickly get started with IntelliFold, you can use the following commands:
->**model**: Choose the model for inference via `--model`. Default: `v2-flash`. Supported: `v1`, `v2`, `v2-flash`.  
->For differences between model versions, please refer to our **release note** [IntelliFold 2 Release Note](https://www.biorxiv.org/content/10.64898/2026.02.09.704787v1)
+### Setup
 
 ```bash
-# Install intellifold from PyPI
-pip install intellifold
-# Run inference with an example YAML file, using the default model (v2-Flash)
-intellifold predict ./examples/5S8I_A.yaml --out_dir ./output --cache ./cache_data --model v2-flash
+git clone https://github.com/IntelliGen-AI/IntelliFold
+cd IntelliFold
 ```
 
-## ⚙️ Installation
+If your environment already has **alphafold3** installed, just add this wrapper:
 
-To more complete installation instructions and usage, please refer to the [Installation Guide](docs/installation.md).
+```bash
+pip install .
+```
 
+Otherwise install the vendored AlphaFold 3 engine first, build its CCD data with `build_data`
+(reads libcifpp's bundled `components.cif` — no network, ~30s), then install this wrapper:
 
-## 🔍 Inference
+```bash
+pip install ./third_party/alphafold3 && build_data
+pip install .
+```
 
-1. **Prepare Input File**: Create a YAML file with your sequences following our [input format specification](docs/input_yaml_format.md)
+`jax[cuda12]` ships its own CUDA libraries and uses the GPU out of the box. **If it instead falls back
+to CPU** (`cuSPARSE ... not found`), a system CUDA on your `LD_LIBRARY_PATH` is shadowing the bundled
+ones — put the bundled libraries first:
 
-2. **Run Prediction**:
-   ```bash
-   intellifold predict your_input.yaml --out_dir ./results
-   ```
+```bash
+export LD_LIBRARY_PATH=$(ls -d "$(python -c 'import nvidia,os;print(os.path.dirname(nvidia.__file__))')"/*/lib | paste -sd:):$LD_LIBRARY_PATH
+```
 
-    IntelliFold v2-Flash will be used by default, you can also use IntelliFold v2 by specifying the model name:
-    ```bash
-    intellifold predict your_input.yaml --out_dir ./results --model v2
-    ```
+### Inference
 
-3. **Check Results**: Find predicted structures and confidence scores in the output directory, you can also check the section of **output format** in [output documentation](docs/input_yaml_format.md#output-format).
+The input is an [AlphaFold 3-style JSON](https://github.com/google-deepmind/alphafold3/blob/main/docs/input.md).
+On the first run the pre-converted IntelliFold-v2 weights are downloaded from Hugging Face into
+`./model_v2` (later runs just load them).
 
-4. **Optional Optimization**: Enable [custom kernels](docs/kernels.md) for faster inference and reduced memory usage
+**Quick start** — the example `fold_input.json` already contains its MSAs and templates, so skip the
+data pipeline with `--norun_data_pipeline`:
 
-For comprehensive usage instructions and examples, refer to the [Usage Guide](docs/usage.md).
+```bash
+wget https://huggingface.co/intelligenAI/intellifold/resolve/main/fold_input.json
+intellifold predict fold_input.json --model-dir=model_v2 --output-dir results -- --norun_data_pipeline
+```
+
+**Search MSAs yourself** — if your JSON has no MSAs, first download the sequence databases, then point
+`--db_dir` at them (AF3 runs its data pipeline to build MSAs/templates):
+
+```bash
+bash third_party/alphafold3/fetch_databases.sh /path/to/databases
+intellifold predict fold_input.json --model-dir=model_v2 --output-dir results -- --db_dir=/path/to/databases
+```
+
+**Batch a directory across every GPU** — predicts every JSON in the directory (one worker per GPU,
+self-balancing local queue, resumable — rerun to continue):
+
+```bash
+intellifold predict ./my_inputs/ --model-dir=model_v2 --gpus all --output-dir results -- --norun_data_pipeline
+```
+
+**`--` passes everything after it straight through to AlphaFold 3** (its own flags) — e.g.
+`--norun_data_pipeline`, `--db_dir=/path/to/databases`, `--num_diffusion_samples=5`. Set `HF_ENDPOINT`
+(e.g. `hf-mirror.com`) for a download mirror.
+
+### How the IntelliFold JAX weights were produced
+
+The hosted `intellifold_v2.bin.zst` + `intellifold_v2_fourier.npz` were converted from the
+IntelliFold-v2 **PyTorch** checkpoint with [`convert_ifv2_to_jax.py`](convert_ifv2_to_jax.py). To
+convert your own `.pt` (needs torch, `pip install '.[convert]'`):
+
+```bash
+python convert_ifv2_to_jax.py --schema intellifold/af3_schema.pkl --v2-pt intellifold_v2.pt --out-dir model_v2
+```
 
 
 ## 🌐 IntelliFold Server
@@ -100,6 +137,7 @@ If you use IntelliFold in your research, please cite our paper:
 
 ## 🔗 Acknowledgements
 
+- This repository runs IntelliFold-v2 on the **AlphaFold 3** JAX inference engine by Google DeepMind ([Apache-2.0](https://github.com/google-deepmind/alphafold3)), vendored at [`third_party/alphafold3/`](third_party/alphafold3) (v3.0.3). The wrapper's `run_jax_inference.py` is a modified copy of AF3's; see [`NOTICE`](NOTICE).
 - The implementation of **fast layernorm operators** is inspired by [OneFlow](https://github.com/Oneflow-Inc/oneflow) and [FastFold](https://github.com/hpcaitech/FastFold), following [Protenix](https://github.com/bytedance/Protenix)'s usage. 
 - Many components in `intellifold/openfold/` are adapted from [OpenFold](https://github.com/aqlaboratory/openfold), with substantial modifications and improvements by our team (except for the `LayerNorm` part).  
 - This repository, the implementation of **Inference Data Pipeline**(Data/Feature Processing and MSA generation tasks) referred to [Boltz-1](https://github.com/jwohlwend/boltz), and modify some codes to adapt to the input of our model.
@@ -111,7 +149,8 @@ If you use IntelliFold in your research, please cite our paper:
 
 The IntelliFold project, including code and model parameters, is made available under the [Apache 2.0 License](./LICENSE), it is free for both academic research and commercial use.
 
+This repo vendors the **Apache-2.0** AlphaFold 3 ([v3.0.3+](https://github.com/google-deepmind/alphafold3/releases/tag/v3.0.3)) in [`third_party/alphafold3/`](third_party/alphafold3) — **not** the earlier CC BY-NC-SA (non-commercial) v3.0.1/v3.0.2. The AF3 model **weights** are *not* included and are non-commercial; this repo ships only IntelliGen-AI's own IntelliFold-v2 weights. See [`NOTICE`](NOTICE).
+
 ## 📬 Contact Us
 
 If you have any questions or are interested in collaboration, please feel free to contact us at contact@intfold.com.
-
