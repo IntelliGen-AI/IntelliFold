@@ -5,4 +5,4 @@ Inference runs on the AlphaFold 3 JAX engine (see `intellifold.cli` /
 `intellifold.openfold` / `intellifold.data`.
 """
 
-__version__ = '2.0.2'
+__version__ = '2.0.3'
