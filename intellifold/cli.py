@@ -121,7 +121,27 @@ def _build_parser() -> argparse.ArgumentParser:
   return p
 
 
+def _require_engine() -> None:
+  """Fail fast with actionable guidance if the AlphaFold 3 JAX engine is absent.
+
+  IntelliFold runs on AF3's JAX engine, which is NOT on PyPI -- it must be built
+  from the Apache-2.0 source vendored in third_party/alphafold3/. `pip install
+  intellifold` only installs this wrapper, so check the engine is importable
+  before doing any real work (e.g. downloading the multi-GB weights).
+  """
+  import importlib.util
+  if importlib.util.find_spec('alphafold3') is None:
+    sys.exit(
+        "error: the AlphaFold 3 JAX engine (module 'alphafold3') is not installed.\n"
+        '  IntelliFold runs on AF3\'s JAX engine, which is not on PyPI and must be\n'
+        '  built from the vendored Apache-2.0 source:\n'
+        '      pip install ./third_party/alphafold3 && build_data\n'
+        '  See the Setup section of the README.')
+
+
 def _run_predict(args, af3_extra) -> int:
+  _require_engine()  # fail fast (before any download) if alphafold3 is missing
+
   # Auto-bootstrap the IntelliFold-v2 weights: on first use, download the
   # pre-converted intellifold_v2.bin.zst + intellifold_v2_fourier.npz from Hugging
   # Face into --model-dir (no torch / no conversion); later runs just load them.

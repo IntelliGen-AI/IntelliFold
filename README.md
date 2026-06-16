@@ -35,23 +35,21 @@ For more details on the benchmarking process and results, please refer to our re
 
 ### Setup
 
+If your environment already has **alphafold3** installed, just add this wrapper from PyPI:
+
+```bash
+pip install intellifold
+```
+
+Otherwise install the vendored AlphaFold 3 engine first. Clone the repo, build the engine and its CCD
+data with `build_data` (reads libcifpp's bundled `components.cif` — no network, ~30s), then install
+the wrapper:
+
 ```bash
 git clone https://github.com/IntelliGen-AI/IntelliFold
 cd IntelliFold
-```
-
-If your environment already has **alphafold3** installed, just add this wrapper:
-
-```bash
-pip install .
-```
-
-Otherwise install the vendored AlphaFold 3 engine first, build its CCD data with `build_data`
-(reads libcifpp's bundled `components.cif` — no network, ~30s), then install this wrapper:
-
-```bash
 pip install ./third_party/alphafold3 && build_data
-pip install .
+pip install intellifold        # or `pip install .` from the clone
 ```
 
 `jax[cuda12]` ships its own CUDA libraries and uses the GPU out of the box. **If it instead falls back

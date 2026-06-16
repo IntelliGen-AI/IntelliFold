@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "intellifold"
-version = "2.0.2"
+version = "2.0.3"
 description = "IntelliFold-v2 on the AlphaFold 3 JAX inference engine."
 readme = "README.md"
 requires-python = ">=3.12"
