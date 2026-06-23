@@ -253,6 +253,7 @@ class Model(hk.Module):
       embeddings: dict[str, jnp.ndarray],
       *,
       sample_config: diffusion_head.SampleConfig,
+      steering: dict[str, jnp.ndarray] | None = None,
   ) -> dict[str, jnp.ndarray]:
     denoising_step = functools.partial(
         self.diffusion_module,
@@ -266,6 +267,7 @@ class Model(hk.Module):
         batch=batch,
         key=hk.next_rng_key(),
         config=sample_config,
+        steering=steering,
     )
     return sample
 
@@ -274,6 +276,16 @@ class Model(hk.Module):
   ) -> ModelResult:
     if key is None:
       key = hk.next_rng_key()
+
+    # Pull optional steering constraint arrays out of the raw feature dict
+    # before it is converted to a typed Batch (which would drop unknown keys).
+    # They are attached on the host only when steering is requested.
+    steering_prefix = 'steering__'
+    steering = {
+        k[len(steering_prefix):]: v
+        for k, v in batch.items()
+        if k.startswith(steering_prefix)
+    } or None
 
     batch = feat_batch.Batch.from_data_dict(batch)
 
@@ -322,6 +334,7 @@ class Model(hk.Module):
         batch,
         embeddings,
         sample_config=self.config.heads.diffusion.eval,
+        steering=steering,
     )
 
     # Compute dist_error_fn over all samples for distance error logging.
