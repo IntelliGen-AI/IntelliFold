@@ -23,3 +23,13 @@ The AlphaFold 3 model parameters ("weights") and outputs generated with them are
 NOT included here and are governed by separate non-commercial terms
 (https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md).
 This repository ships only IntelliGen-AI's own IntelliFold-v2 weights.
+
+This product includes diffusion-steering ("physical guidance") code under
+intellifold/steering/ derived from Boltz (https://github.com/jwohlwend/boltz),
+Copyright (c) 2024 Jeremy Wohlwend, Gabriele Corso, and Saro Passaro, licensed
+under the MIT License. constants.py reuses the van-der-Waals radii table and
+element-count constant; rdkit_features.py adapts the RDKit/PoseBusters geometry,
+chirality, stereo, and planar-bond constraint extraction (SMARTS patterns and
+flat-bottom buffers); guidance.py reuses the schedule formula and the default
+physical-guidance weights/intervals/buffers. The full Boltz MIT license text is
+in THIRD_PARTY_LICENSES/Boltz-MIT.txt.
