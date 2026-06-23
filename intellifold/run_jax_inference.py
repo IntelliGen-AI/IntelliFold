@@ -384,6 +384,23 @@ _NUM_DIFFUSION_SAMPLES = flags.DEFINE_integer(
     'Number of diffusion samples to generate.',
     lower_bound=1,
 )
+_STEERING = flags.DEFINE_boolean(
+    'steering',
+    False,
+    'Enable diffusion steering (physical gradient guidance) on the ligand'
+    ' geometry during sampling. Off by default.',
+)
+_STEERING_NUM_GD_STEPS = flags.DEFINE_integer(
+    'steering_num_gd_steps',
+    20,
+    'Gradient-descent iterations per denoising step when --steering is set.',
+    lower_bound=1,
+)
+_STEERING_WEIGHT_SCALE = flags.DEFINE_float(
+    'steering_weight_scale',
+    1.0,
+    'Global multiplier on every steering potential weight (1.0 = default).',
+)
 _NUM_SEEDS = flags.DEFINE_integer(
     'num_seeds',
     None,
@@ -433,6 +450,9 @@ def make_model_config(
     num_recycles: int = 10,
     return_embeddings: bool = False,
     return_distogram: bool = False,
+    steering: bool = False,
+    steering_num_gd_steps: int = 20,
+    steering_weight_scale: float = 1.0,
 ) -> model.Model.Config:
   """Returns a model config with some defaults overridden."""
   config = model.Model.Config()
@@ -445,6 +465,9 @@ def make_model_config(
       flash_attention_implementation
   )
   config.heads.diffusion.eval.num_samples = num_diffusion_samples
+  config.heads.diffusion.eval.steering_enabled = steering
+  config.heads.diffusion.eval.steering_num_gd_steps = steering_num_gd_steps
+  config.heads.diffusion.eval.steering_weight_scale = steering_weight_scale
   config.num_recycles = num_recycles
   config.return_embeddings = return_embeddings
   config.return_distogram = return_distogram
@@ -606,7 +629,33 @@ def predict_structure(
   )
   all_inference_start_time = time.time()
   all_inference_results = []
+  steering_on = (
+      model_runner._model_config.heads.diffusion.eval.steering_enabled
+  )
   for seed, example in zip(fold_input.rng_seeds, featurised_examples):
+    if steering_on:
+      from intellifold.steering import (
+          build_steering_features,
+          STEERING_KEY_PREFIX,
+      )
+
+      steering_feats = build_steering_features(example, ccd)
+      if steering_feats:
+        for _k, _v in steering_feats.items():
+          example[STEERING_KEY_PREFIX + _k] = _v
+        _n = steering_feats.get(
+            'posebusters_index', np.empty((2, 0))
+        ).shape[1]
+        print(
+            f'[steering] attached constraints for {fold_input.name}'
+            f' ({_n} bound pairs across'
+            f' {len(steering_feats) // 3} potential groups).'
+        )
+      else:
+        print(
+            f'[steering] {fold_input.name}: no constrainable ligand residues;'
+            ' running unsteered.'
+        )
     print(f'Running model inference with seed {seed}...')
     inference_start_time = time.time()
     rng_key = jax.random.PRNGKey(seed)
@@ -1049,6 +1098,9 @@ def main(_):
             num_recycles=_NUM_RECYCLES.value,
             return_embeddings=_SAVE_EMBEDDINGS.value,
             return_distogram=_SAVE_DISTOGRAM.value,
+            steering=_STEERING.value,
+            steering_num_gd_steps=_STEERING_NUM_GD_STEPS.value,
+            steering_weight_scale=_STEERING_WEIGHT_SCALE.value,
         ),
         device=devices[_GPU_DEVICE.value],
         model_dir=pathlib.Path(MODEL_DIR.value),

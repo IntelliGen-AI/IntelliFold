@@ -105,6 +105,11 @@ class SampleConfig(base_config.BaseConfig):
   noise_scale: float = 1.003
   step_scale: float = 1.5
   num_samples: int = 1
+  # Diffusion steering (physical guidance). Off by default; when enabled the
+  # caller must also supply the per-target steering arrays to `sample`.
+  steering_enabled: bool = False
+  steering_num_gd_steps: int = 20
+  steering_weight_scale: float = 1.0
 
 
 class DiffusionHead(hk.Module):
@@ -308,6 +313,7 @@ def sample(
     batch: feat_batch.Batch,
     key: jnp.ndarray,
     config: SampleConfig,
+    steering: dict[str, jnp.ndarray] | None = None,
 ) -> dict[str, jnp.ndarray]:
   """Sample using denoiser on batch.
 
@@ -317,6 +323,9 @@ def sample(
     key: random key
     config: config for the sampling process (e.g. number of denoising steps,
       etc.)
+    steering: optional dict of host-built steering constraint arrays. When set
+      and ``config.steering_enabled`` is True, gradient guidance from the
+      physical potentials is applied to each step's x0 prediction.
 
   Returns:
     a dict
@@ -330,7 +339,14 @@ def sample(
 
   mask = batch.predicted_structure_info.atom_mask
 
-  def apply_denoising_step(carry, noise_level):
+  steering_on = config.steering_enabled and steering is not None
+  if steering_on:
+    from intellifold.steering import guidance as steering_guidance
+
+    steering_groups = steering_guidance.default_groups()
+
+  def apply_denoising_step(carry, scan_in):
+    noise_level, step_idx = scan_in
     key, positions, noise_level_prev = carry
     key, key_noise, key_aug = jax.random.split(key, 3)
 
@@ -346,6 +362,23 @@ def sample(
     positions_noisy = positions + noise
 
     positions_denoised = denoising_step(positions_noisy, t_hat)
+
+    if steering_on:
+      # Normalised diffusion time goes 1 -> 0 across the schedule, matching the
+      # PyTorch sampler's `steering_t = 1 - step / num_steps`.
+      t_norm = 1.0 - step_idx / config.steps
+      is_last = step_idx >= config.steps - 1
+      positions_denoised = steering_guidance.apply_guidance(
+          positions_denoised,
+          mask,
+          steering,
+          t_norm,
+          is_last,
+          num_gd_steps=config.steering_num_gd_steps,
+          weight_scale=config.steering_weight_scale,
+          groups=steering_groups,
+      )
+
     grad = (positions_noisy - positions_denoised) / t_hat
 
     d_t = noise_level - t_hat
@@ -370,7 +403,10 @@ def sample(
   apply_denoising_step = hk.vmap(
       apply_denoising_step, in_axes=(0, None), split_rng=(not hk.running_init())
   )
-  result, _ = hk.scan(apply_denoising_step, init, noise_levels[1:], unroll=4)
+  step_indices = jnp.arange(config.steps)
+  result, _ = hk.scan(
+      apply_denoising_step, init, (noise_levels[1:], step_indices), unroll=4
+  )
   _, positions_out, _ = result
 
   final_dense_atom_mask = jnp.tile(mask[None], (num_samples, 1, 1))

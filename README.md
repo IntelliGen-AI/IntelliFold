@@ -89,9 +89,33 @@ self-balancing local queue, resumable — rerun to continue):
 intellifold predict ./my_inputs/ --model-dir=model_v2 --gpus all --output-dir results -- --norun_data_pipeline
 ```
 
+**Steer toward physically valid poses (optional, off by default)** — add `--steering` to nudge the
+diffusion sampler at every denoising step with the gradient of a set of differentiable
+physical/chemical potentials (bond lengths & angles, internal clashes, chirality, double-bond / ring
+planarity, protein–ligand van-der-Waals overlap, covalent connections, and symmetric-chain
+repulsion). This improves the **physical plausibility** of predicted small-molecule poses without
+retraining — on our PoseBusters-v2 evaluation it raises the PoseBusters validity rate from **~72% to
+~93%** (and the joint "valid **and** pocket-aligned ligand RMSD < 2 Å" rate from ~62% to ~75%) while
+leaving docking accuracy essentially unchanged. Without `--steering` the sampler is unchanged.
+
+```bash
+intellifold predict fold_input.json --model-dir=model_v2 --output-dir results \
+    -- --norun_data_pipeline --steering
+```
+
+Steering tuning flags (also after `--`): `--steering_num_gd_steps` (default `20`, gradient-descent
+iterations per denoising step) and `--steering_weight_scale` (default `1.0`, global multiplier on all
+potential weights).
+
+> ⚠️ **Steering is slower.** It runs `num_gd_steps` extra gradient evaluations inside every denoising
+> step, and because the per-target constraint set has a target-specific shape, each input triggers its
+> own XLA compilation (the no-steering path reuses bucketed compilations across inputs). Expect a
+> noticeably longer wall-clock per target — only enable it when you want the improved physical
+> validity; for large batches keep it off unless you specifically need PoseBusters-clean poses.
+
 **`--` passes everything after it straight through to AlphaFold 3** (its own flags) — e.g.
-`--norun_data_pipeline`, `--db_dir=/path/to/databases`, `--num_diffusion_samples=5`. Set `HF_ENDPOINT`
-(e.g. `hf-mirror.com`) for a download mirror.
+`--norun_data_pipeline`, `--db_dir=/path/to/databases`, `--num_diffusion_samples=5`, `--steering`. Set
+`HF_ENDPOINT` (e.g. `hf-mirror.com`) for a download mirror.
 
 ### How the IntelliFold JAX weights were produced
 
