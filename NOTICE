@@ -5,11 +5,16 @@ This product includes software developed by DeepMind Technologies Limited as par
 of AlphaFold 3 (https://github.com/google-deepmind/alphafold3), licensed under the
 Apache License, Version 2.0.
 
-  * third_party/alphafold3/ is a verbatim copy of AlphaFold 3 v3.0.3 (Copyright
-    2024 DeepMind Technologies Limited; Apache-2.0), with the original per-file
-    license headers and the repository's LICENSE/OUTPUT_TERMS/WEIGHTS_TERMS files
-    retained unmodified. The bundled src/alphafold3/test_data/ fixtures were
-    omitted; no other files were changed.
+  * third_party/alphafold3/ is a copy of AlphaFold 3 v3.0.3 (Copyright 2024
+    DeepMind Technologies Limited; Apache-2.0), with the original per-file license
+    headers and the repository's LICENSE/OUTPUT_TERMS/WEIGHTS_TERMS files retained.
+    The bundled src/alphafold3/test_data/ fixtures were omitted. Files modified by
+    IntelliGen-AI, 2026:
+      - src/alphafold3/model/network/atom_cross_attention.py: optional
+        queries-layout gather of the keys' ref_space_uid (off by default; see the
+        modification notice in the file header);
+      - src/alphafold3/model/network/diffusion_head.py: optional inference-time
+        diffusion steering (off by default).
   * intellifold/run_jax_inference.py is a MODIFIED copy of AlphaFold 3's
     run_alphafold.py (Copyright 2024 DeepMind Technologies Limited; Apache-2.0).
     Modifications by IntelliGen-AI, 2026 -- see the modification notice in the

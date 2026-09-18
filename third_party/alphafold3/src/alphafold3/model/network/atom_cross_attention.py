@@ -16,6 +16,16 @@
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
 # if received directly from Google. Use is subject to terms of use available at
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
+#
+# ----------------------------------------------------------------------------
+# NOTICE OF MODIFICATION (Apache-2.0 sec. 4(b))
+# Modified by IntelliGen-AI in 2026. Changes vs. AlphaFold 3 v3.0.3:
+#   * add `AtomCrossAttEncoderConfig.keys_ref_space_uid_from_queries` and the
+#     `_keys_ref_space_uid` helper, so the keys' ref_space_uid can be gathered from
+#     the queries layout (the layout `queries_to_keys` indexes). Default False keeps
+#     the upstream behaviour exactly; IntelliFold-v2 turns it on (see
+#     intellifold/patches.py). Upstream report: google-deepmind/alphafold3#730.
+# ----------------------------------------------------------------------------
 
 """Per-atom cross attention."""
 import dataclasses
@@ -38,6 +48,18 @@ class AtomCrossAttEncoderConfig(base_config.BaseConfig):
       base_config.autocreate(num_intermediate_factor=2, num_blocks=3)
   )
   per_atom_pair_channels: int = 16
+  # How the keys' ref_space_uid is gathered for the same-reference-space mask
+  # `offsets_valid`. `queries_to_keys` indexes the flattened QUERIES layout
+  # (num_subsets, num_queries). False (AlphaFold 3 behaviour) applies it to
+  # `batch.ref_structure.ref_space_uid`, which is in the token-atom layout
+  # (num_tokens, num_dense): same flattened size, but a different atom at each
+  # index once any token has fewer than num_dense atoms, so the mask is almost
+  # all False and the reference-conformer offsets barely enter. True gathers
+  # from the queries layout, the same token -> queries -> keys path as
+  # `keys_ref_pos`, so the mask marks query/key atoms in the same reference
+  # conformer. Weights must be run with the setting they were trained with:
+  # stock AF3 -> False, IntelliFold-v2 -> True.
+  keys_ref_space_uid_from_queries: bool = False
 
 
 def _per_atom_conditioning(
@@ -121,6 +143,23 @@ jax.tree_util.register_dataclass(
     data_fields=[f.name for f in dataclasses.fields(AtomCrossAttEncoderOutput)],
     meta_fields=[],
 )
+
+
+def _keys_ref_space_uid(
+    queries_to_keys: atom_layout.GatherInfo,
+    queries_ref_space_uid: jnp.ndarray,
+    token_atoms_ref_space_uid: jnp.ndarray,
+    from_queries: bool,
+) -> jnp.ndarray:
+  """ref_space_uid of every key atom, shape (num_subsets, num_keys).
+
+  See AtomCrossAttEncoderConfig.keys_ref_space_uid_from_queries for why the
+  source layout matters. Note that `atom_layout.convert` only checks the source
+  shape against `queries_to_keys.input_shape` for numpy GatherInfo; under jit the
+  token-atom source passes silently.
+  """
+  source = queries_ref_space_uid if from_queries else token_atoms_ref_space_uid
+  return atom_layout.convert(queries_to_keys, source, layout_axes=(-2, -1))
 
 
 def atom_cross_att_encoder(
@@ -276,10 +315,11 @@ def atom_cross_att_encoder(
       queries_ref_pos,
       layout_axes=(-3, -2),
   )
-  keys_ref_space_uid = atom_layout.convert(
+  keys_ref_space_uid = _keys_ref_space_uid(
       batch.atom_cross_att.queries_to_keys,
+      queries_ref_space_uid,
       batch.ref_structure.ref_space_uid,
-      layout_axes=(-2, -1),
+      from_queries=c.keys_ref_space_uid_from_queries,
   )
 
   offsets_valid = (

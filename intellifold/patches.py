@@ -99,8 +99,8 @@ def apply_fourier_patch(npz_path: str | None = None) -> bool:
   return True
 
 
-# IntelliFold-v2 "full_fat" preset. Everything not listed is identical to the
-# public AF3 config (c_s=384/16 heads, c_token=768/16, c_atom=128/4; block counts
+# IntelliFold-v2 "full_fat" preset (plus one behavioural flag, see the last two
+# entries). Everything not listed is identical to the public AF3 config (c_s=384/16 heads, c_token=768/16, c_atom=128/4; block counts
 # 48 pairformer / 24 diffusion-transformer / 4 msa / 2 template / 4 confidence).
 _FULLFAT_OVERRIDES = {
     'evoformer.pair_channel': 512,                                   # c_z
@@ -111,6 +111,13 @@ _FULLFAT_OVERRIDES = {
     'evoformer.pairformer.pair_attention.num_head': 8,
     'evoformer.template.template_stack.pair_attention.num_head': 8,
     'heads.confidence.pairformer.pair_attention.num_head': 8,
+    # Not a dimension: IntelliFold-v2 was trained with the per-atom-pair
+    # same-reference-space mask built from the queries layout, the semantics of
+    # intellifold/openfold (the PyTorch model). Both atom cross-attention encoders
+    # (trunk conditioning and diffusion head) must use it; see
+    # atom_cross_attention.AtomCrossAttEncoderConfig.keys_ref_space_uid_from_queries.
+    'evoformer.per_atom_conditioning.keys_ref_space_uid_from_queries': True,
+    'heads.diffusion.keys_ref_space_uid_from_queries': True,
 }
 
 
