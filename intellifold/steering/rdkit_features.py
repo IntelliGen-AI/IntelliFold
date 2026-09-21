@@ -60,6 +60,35 @@ _PLANAR_BUFFER = 0.26180
 _VDW_BUFFER = 0.225
 _CONNECTIONS_BUFFER = 2.0
 
+# Upper bounds (A) for a connection that involves a metal. _CONNECTIONS_BUFFER is for
+# covalent bonds; metal coordination is longer and element dependent -- ~2.0 A for Zn/Cu-N
+# up to ~2.8 A for K/Ba-O in high-resolution protein structures (Harding, Acta Cryst D
+# 2006; Bazayeva et al., Acta Cryst D 2024) -- so a 2.0 A bound pulls an ion that is
+# already in place below its real distance. Bound = typical distance + ~2 sigma, looser for
+# alkali and alkaline-earth ions, whose distances scatter more (sigma 0.1-0.2 A against
+# ~0.05 A for Zn-N / Zn-S). Keys are atomic numbers, as in ref_element.
+_TRANSITION_METALS_Z = frozenset({25, 26, 27, 28, 29, 30})       # Mn Fe Co Ni Cu Zn
+_TRANSITION_METAL_BOUNDS = (2.35, 2.6)                            # (N / O donor, S / Se)
+_ION_BOUNDS_Z = {12: 2.45, 20: 2.8, 11: 2.8, 3: 2.8,             # Mg Ca Na Li
+                 19: 3.2, 37: 3.2, 55: 3.2, 38: 3.2, 56: 3.2}     # K Rb Cs Sr Ba
+_OTHER_METAL_BOUND = 2.8                                          # e.g. Cd, Hg, lanthanides
+_METALS_Z = frozenset(
+    {3, 4, 11, 12, 13, 19, 20, 31, 37, 38, 49, 50, 51, 55, 56, 81, 82, 83, 90, 92}
+    | set(range(21, 31)) | set(range(39, 49)) | set(range(57, 81)))
+
+
+def _connection_upper(z_a: int, z_b: int) -> float:
+    """Connections-potential upper bound (A) for a bond between atomic numbers z_a, z_b."""
+    bounds = []
+    for metal, donor in ((z_a, z_b), (z_b, z_a)):
+        if metal not in _METALS_Z:
+            continue
+        if metal in _TRANSITION_METALS_Z:
+            bounds.append(_TRANSITION_METAL_BOUNDS[donor in (16, 34)])
+        else:
+            bounds.append(_ION_BOUNDS_Z.get(metal, _OTHER_METAL_BOUND))
+    return max(bounds) if bounds else _CONNECTIONS_BUFFER
+
 _PLANAR_SMARTS = "[C;X3;^2](*)(*)=[C;X3;^2](*)(*)"
 
 
@@ -577,7 +606,9 @@ def build_steering_features(
     if conn_index.shape[1]:
         out["connections_index"] = conn_index.astype(np.int32)
         out["connections_lower"] = np.full(conn_index.shape[1], -np.inf, np.float32)
-        out["connections_upper"] = np.full(conn_index.shape[1], _CONNECTIONS_BUFFER, np.float32)
+        z = ref_element.reshape(-1)
+        out["connections_upper"] = np.asarray(
+            [_connection_upper(int(z[a]), int(z[b])) for a, b in conn_index.T], np.float32)
 
     vdw_index, vdw_lower = _build_vdw(asym_token, pdam, atom_vdw, A, conn_chains)
     if vdw_index.shape[1]:
