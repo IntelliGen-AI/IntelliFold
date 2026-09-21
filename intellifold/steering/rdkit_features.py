@@ -311,9 +311,11 @@ def _build_connections(example, A):
     Every covalent bond that
     crosses a residue boundary (polymer-ligand, ligand-ligand inter-residue)
     becomes a soft-bond constraint, and the chains it links are recorded so
-    VDW overlap skips them. AF3 exposes these as gather tables; same-residue
-    (intra-ligand) bonds are already covered by the PoseBusters bounds and are
-    excluded via ``ref_space_uid``.
+    VDW overlap skips them. AF3 exposes these as gather tables: polymer-ligand
+    bonds at atom level (flat ``token*A + slot`` indices), ligand-ligand bonds
+    at token level only -- a ligand atom is a token of its own, held in slot 0.
+    Same-residue (intra-ligand) bonds are already covered by the PoseBusters
+    bounds and are excluded via ``ref_space_uid``.
     """
     asym_atom = None
     pdam = np.asarray(example["pred_dense_atom_mask"]).astype(bool)  # [T, A]
@@ -321,15 +323,20 @@ def _build_connections(example, A):
     asym_tok = np.asarray(example["asym_id"])
     pairs, chain_pairs, seen = [], [], set()
 
-    for key in ("token_atoms_to_polymer_ligand_bonds", "token_atoms_to_ligand_ligand_bonds"):
+    atom_present = pdam.reshape(-1)
+    # (key, scale): scale turns a gathered index into a flat atom index -- 1 for the
+    # atom-level polymer-ligand table, A for the token-level ligand-ligand table (the
+    # ligand atom sits in slot 0 of its own token).
+    for key, scale in (("token_atoms_to_polymer_ligand_bonds", 1),
+                       ("tokens_to_ligand_ligand_bonds", A)):
         gi = example.get(f"{key}:gather_idxs")
         gm = example.get(f"{key}:gather_mask")
         if gi is None or gm is None:
             continue
-        gi = np.asarray(gi)
+        gi = np.asarray(gi) * scale
         gm = np.asarray(gm).astype(bool)
-        # Each row that is fully masked-in encodes one bond's two flat atom
-        # endpoints (token*A + slot). Layout: [N, 2] of flat atom indices.
+        # Each row that is fully masked-in encodes one bond's two endpoints.
+        # Layout: [N, 2] of flat atom indices (token*A + slot) after scaling.
         if gi.ndim != 2 or gi.shape[1] != 2:
             continue
         valid = gm.all(axis=-1)
@@ -339,6 +346,8 @@ def _build_connections(example, A):
                 continue
             ta, tb = fa // A, fb // A
             if ta >= asym_tok.shape[0] or tb >= asym_tok.shape[0]:
+                continue
+            if not (atom_present[fa] and atom_present[fb]):
                 continue
             # Skip intra-residue bonds (already in PoseBusters bounds).
             if ref_uid is not None:
