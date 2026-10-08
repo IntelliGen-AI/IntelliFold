@@ -60,6 +60,41 @@ _PLANAR_BUFFER = 0.26180
 _VDW_BUFFER = 0.225
 _CONNECTIONS_BUFFER = 2.0
 
+# Metal coordination. _CONNECTIONS_BUFFER is for covalent bonds; coordination distances
+# are longer and depend on the metal and the donor, ~2.0 A for Zn/Cu-N up to ~2.8 A for
+# K/Ba-O. A connection with a metal is held in a window around its typical distance d0 in
+# high-resolution protein structures (Harding, Acta Cryst D 2006; Bazayeva et al., Acta
+# Cryst D 2024): [d0 - tol, d0 + tol]. The potential is flat inside the window, so an ion
+# already in place is left alone, while an ion pulled in from outside stops at the
+# window's edge -- hence tight tolerances, ~2-3 sigma of the observed spread: 0.15 A for
+# transition metals (sigma ~0.05-0.07 A), 0.2 A for Mg, 0.25-0.3 A for alkali and larger
+# alkaline-earth ions (sigma 0.1-0.2 A). Keys are atomic numbers, as in ref_element.
+_COORDINATION_Z = {    # Z: (d0 to N / O, d0 to S / Se, tol), A
+    30: (2.05, 2.33, 0.15), 26: (2.10, 2.31, 0.15), 27: (2.11, 2.30, 0.15),   # Zn Fe Co
+    28: (2.09, 2.30, 0.15), 29: (2.02, 2.25, 0.15), 25: (2.19, 2.40, 0.15),   # Ni Cu Mn
+    12: (2.09, 2.55, 0.20), 20: (2.39, 2.85, 0.25), 11: (2.40, 2.85, 0.25),   # Mg Ca Na
+    3: (2.00, 2.50, 0.25), 19: (2.84, 3.30, 0.30), 37: (2.95, 3.40, 0.30),    # Li K Rb
+    55: (3.10, 3.55, 0.30), 38: (2.60, 3.05, 0.30), 56: (2.80, 3.25, 0.30),   # Cs Sr Ba
+    48: (2.30, 2.54, 0.20), 80: (2.30, 2.40, 0.20),                           # Cd Hg
+}
+_OTHER_METAL = (2.40, 2.60, 0.35)                                 # e.g. lanthanides, Mo, W
+_METALS_Z = frozenset(
+    {3, 4, 11, 12, 13, 19, 20, 31, 37, 38, 49, 50, 51, 55, 56, 81, 82, 83, 90, 92}
+    | set(range(21, 31)) | set(range(39, 49)) | set(range(57, 81)))
+
+
+def _connection_window(z_a: int, z_b: int) -> tuple:
+    """(lower, upper) bound (A) for a connection between atomic numbers z_a, z_b."""
+    windows = []
+    for metal, donor in ((z_a, z_b), (z_b, z_a)):
+        if metal in _METALS_Z:
+            d0_no, d0_s, tol = _COORDINATION_Z.get(metal, _OTHER_METAL)
+            d0 = d0_s if donor in (16, 34) else d0_no
+            windows.append((d0 - tol, d0 + tol))
+    if not windows:
+        return -np.inf, _CONNECTIONS_BUFFER
+    return min(w[0] for w in windows), max(w[1] for w in windows)
+
 _PLANAR_SMARTS = "[C;X3;^2](*)(*)=[C;X3;^2](*)(*)"
 
 
@@ -311,9 +346,11 @@ def _build_connections(example, A):
     Every covalent bond that
     crosses a residue boundary (polymer-ligand, ligand-ligand inter-residue)
     becomes a soft-bond constraint, and the chains it links are recorded so
-    VDW overlap skips them. AF3 exposes these as gather tables; same-residue
-    (intra-ligand) bonds are already covered by the PoseBusters bounds and are
-    excluded via ``ref_space_uid``.
+    VDW overlap skips them. AF3 exposes these as gather tables: polymer-ligand
+    bonds at atom level (flat ``token*A + slot`` indices), ligand-ligand bonds
+    at token level only -- a ligand atom is a token of its own, held in slot 0.
+    Same-residue (intra-ligand) bonds are already covered by the PoseBusters
+    bounds and are excluded via ``ref_space_uid``.
     """
     asym_atom = None
     pdam = np.asarray(example["pred_dense_atom_mask"]).astype(bool)  # [T, A]
@@ -321,15 +358,20 @@ def _build_connections(example, A):
     asym_tok = np.asarray(example["asym_id"])
     pairs, chain_pairs, seen = [], [], set()
 
-    for key in ("token_atoms_to_polymer_ligand_bonds", "token_atoms_to_ligand_ligand_bonds"):
+    atom_present = pdam.reshape(-1)
+    # (key, scale): scale turns a gathered index into a flat atom index -- 1 for the
+    # atom-level polymer-ligand table, A for the token-level ligand-ligand table (the
+    # ligand atom sits in slot 0 of its own token).
+    for key, scale in (("token_atoms_to_polymer_ligand_bonds", 1),
+                       ("tokens_to_ligand_ligand_bonds", A)):
         gi = example.get(f"{key}:gather_idxs")
         gm = example.get(f"{key}:gather_mask")
         if gi is None or gm is None:
             continue
-        gi = np.asarray(gi)
+        gi = np.asarray(gi) * scale
         gm = np.asarray(gm).astype(bool)
-        # Each row that is fully masked-in encodes one bond's two flat atom
-        # endpoints (token*A + slot). Layout: [N, 2] of flat atom indices.
+        # Each row that is fully masked-in encodes one bond's two endpoints.
+        # Layout: [N, 2] of flat atom indices (token*A + slot) after scaling.
         if gi.ndim != 2 or gi.shape[1] != 2:
             continue
         valid = gm.all(axis=-1)
@@ -339,6 +381,8 @@ def _build_connections(example, A):
                 continue
             ta, tb = fa // A, fb // A
             if ta >= asym_tok.shape[0] or tb >= asym_tok.shape[0]:
+                continue
+            if not (atom_present[fa] and atom_present[fb]):
                 continue
             # Skip intra-residue bonds (already in PoseBusters bounds).
             if ref_uid is not None:
@@ -567,8 +611,11 @@ def build_steering_features(
     conn_index, conn_chains = _build_connections(example, A)
     if conn_index.shape[1]:
         out["connections_index"] = conn_index.astype(np.int32)
-        out["connections_lower"] = np.full(conn_index.shape[1], -np.inf, np.float32)
-        out["connections_upper"] = np.full(conn_index.shape[1], _CONNECTIONS_BUFFER, np.float32)
+        z = ref_element.reshape(-1)
+        windows = np.asarray(
+            [_connection_window(int(z[a]), int(z[b])) for a, b in conn_index.T], np.float32)
+        out["connections_lower"] = windows[:, 0]
+        out["connections_upper"] = windows[:, 1]
 
     vdw_index, vdw_lower = _build_vdw(asym_token, pdam, atom_vdw, A, conn_chains)
     if vdw_index.shape[1]:
